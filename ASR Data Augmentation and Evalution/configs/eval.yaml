@@ -1,0 +1,12 @@
+audio_manifest: data/augmented/manifests/audio_manifest.jsonl
+predictions_path: outputs/asr_predictions/predictions.jsonl
+metrics_dir: outputs/metrics
+
+asr_model: facebook/wav2vec2-base-960h
+bertscore_model: microsoft/deberta-large-mnli
+
+batch_size: 8
+device: auto
+
+chunk_length_s: 15
+stride_length_s: 2

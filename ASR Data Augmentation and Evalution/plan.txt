@@ -1,0 +1,720 @@
+# plan.md
+
+## 1. Goal
+
+Build a local, free pipeline that:
+
+1. Takes clean LibriSpeech transcripts.
+2. Converts them into stuttered/disfluent transcripts using the paper’s augmentation logic.
+3. Generates clean and stuttered synthetic audio using an open-source TTS model.
+4. Evaluates the generated speech using ASR + `WER` + `BERTScore`.
+
+This pipeline will mainly support **synthetic stuttered speech creation and evaluation**, not ASR fine-tuning yet.
+
+---
+
+## 2. Scope
+
+### Included
+
+- Clean text ingestion from LibriSpeech.
+- Text normalization.
+- Disfluency augmentation:
+  - word repetition
+  - phrase repetition
+  - interjections: `uh`, `um`
+- Speech generation using HuggingFace SpeechT5.
+- Multiple speaker embeddings for diversity.
+- ASR inference using `facebook/wav2vec2-base-960h`.
+- Evaluation using:
+  - WER
+  - BERTScore with `microsoft/deberta-large-mnli`
+
+### Not included for now
+
+- ASR fine-tuning.
+- Real stuttering audio collection.
+- Paid TTS APIs.
+- Forced alignment or timestamp-level disfluency detection.
+
+---
+
+## 3. High-Level Pipeline
+
+```text
+LibriSpeech clean transcripts
+        |
+        v
+Text cleaning + normalization
+        |
+        v
+Disfluency augmentation
+        |
+        v
+Clean text + Stuttered text
+        |
+        v
+SpeechT5 TTS with multiple speakers
+        |
+        v
+Clean synthetic audio + Stuttered synthetic audio
+        |
+        v
+wav2vec 2.0 ASR inference
+        |
+        v
+WER + BERTScore evaluation
+```
+
+---
+
+## 4. Dataset Plan
+
+Use LibriSpeech as the clean text source.
+
+Recommended starting subset:
+
+```text
+dev-clean or a small sampled subset of train-clean-100
+```
+
+For initial testing:
+
+```text
+200 to 500 utterances
+```
+
+For larger augmentation:
+
+```text
+1000 to 6000 augmented samples
+```
+
+Basic filtering:
+
+```text
+minimum words: 4
+maximum words: 30
+remove very long or malformed sentences
+```
+
+---
+
+## 5. Text Normalization
+
+Use normalized text for augmentation and evaluation.
+
+Normalization steps:
+
+```text
+lowercase
+remove punctuation
+collapse multiple spaces
+strip whitespace
+```
+
+Example:
+
+```text
+Original:
+Mr. Quilter is the apostle of the middle classes.
+
+Normalized:
+mr quilter is the apostle of the middle classes
+```
+
+---
+
+## 6. Disfluency Augmentation Logic
+
+Follow the paper’s augmentation rules.
+
+### 6.1 Word repetition
+
+Select:
+
+```text
+1 to 3 words per utterance
+```
+
+Repeat each selected word:
+
+```text
+1 to 4 additional times initially
+1 to 6 additional times in expanded setting
+```
+
+Example:
+
+```text
+clean:
+my name is john
+
+stuttered:
+my my my name is john
+```
+
+---
+
+### 6.2 Phrase repetition
+
+Select:
+
+```text
+phrase length: 2 to 4 words
+```
+
+Repeat phrase:
+
+```text
+1 to 3 additional times initially
+1 to 5 additional times in expanded setting
+```
+
+Example:
+
+```text
+clean:
+my name is john
+
+stuttered:
+my name my name my name is john
+```
+
+---
+
+### 6.3 Interjections
+
+Insert:
+
+```text
+uh or um
+```
+
+Insertion locations:
+
+```text
+1 to 4 locations
+```
+
+Repeat interjections:
+
+```text
+1 to 4 times initially
+1 to 7 times in expanded setting
+```
+
+Example:
+
+```text
+clean:
+my name is john
+
+stuttered:
+my um um name is john
+```
+
+---
+
+## 7. Augmentation Constraints
+
+Adjust disfluency insertion based on utterance length.
+
+Rules:
+
+```text
+Do not insert more disfluencies than the utterance can support.
+Do not select phrases longer than the utterance.
+Reduce repetition count for very short sentences.
+Avoid overlapping events when possible.
+```
+
+Example:
+
+```text
+If utterance has only 2 words:
+    do not insert 4 interjections
+    do not use a 4-word phrase repetition
+```
+
+---
+
+## 8. Output Metadata
+
+For each augmented sample, store:
+
+```json
+{
+  "utterance_id": "1272-128104-0000",
+  "clean_text": "my name is john",
+  "stuttered_text": "my my my name is john",
+  "speaker_id": "slt",
+  "is_disfluent": true,
+  "disfluency_events": [
+    {
+      "type": "word_repetition",
+      "target": "my",
+      "additional_repetitions": 2
+    }
+  ]
+}
+```
+
+This will help later if you use the data for stuttered speech detection.
+
+---
+
+## 9. TTS Plan
+
+Use HuggingFace SpeechT5 as the free TTS model.
+
+Models:
+
+```text
+TTS model:
+microsoft/speecht5_tts
+
+Vocoder:
+microsoft/speecht5_hifigan
+
+Speaker embeddings:
+Matthijs/cmu-arctic-xvectors
+```
+
+Generate two types of audio:
+
+```text
+1. Clean synthetic speech
+2. Stuttered synthetic speech
+```
+
+For each utterance:
+
+```text
+clean_text -> clean_audio
+stuttered_text -> stuttered_audio
+```
+
+Use the same speaker for both versions so evaluation is fair.
+
+---
+
+## 10. Speaker Diversity
+
+Use multiple CMU Arctic speaker vectors.
+
+Example speakers:
+
+```text
+slt
+bdl
+clb
+rms
+awb
+jmk
+ksp
+lnh
+```
+
+Speaker assignment:
+
+```text
+Each utterance is assigned one speaker.
+Clean and stuttered versions use the same speaker.
+```
+
+Later expansion:
+
+```text
+Generate each utterance with multiple speakers.
+```
+
+---
+
+## 11. Audio Output Format
+
+Save generated audio as:
+
+```text
+format: FLAC or WAV
+sample_rate: 16000 Hz
+channels: mono
+```
+
+Directory structure:
+
+```text
+data/augmented/audio/clean/
+data/augmented/audio/stuttered/
+```
+
+Example filenames:
+
+```text
+1272-128104-0000_clean_spk_slt.flac
+1272-128104-0000_stuttered_spk_slt.flac
+```
+
+---
+
+## 12. Evaluation Pipeline
+
+Use a pretrained ASR model to transcribe the generated audio.
+
+ASR model:
+
+```text
+facebook/wav2vec2-base-960h
+```
+
+Evaluation reference:
+
+```text
+original clean LibriSpeech transcript
+```
+
+Hypotheses:
+
+```text
+ASR output from clean synthetic audio
+ASR output from stuttered synthetic audio
+```
+
+Metrics:
+
+```text
+WER
+BERTScore
+```
+
+---
+
+## 13. WER Evaluation
+
+Use `jiwer` or a similar library.
+
+WER compares:
+
+```text
+reference = original clean text
+hypothesis = ASR transcription of generated audio
+```
+
+Compute:
+
+```text
+WER
+substitutions
+deletions
+insertions
+```
+
+Example:
+
+```text
+reference:
+my name is john
+
+hypothesis:
+my my my name is john
+
+WER increases because of inserted repeated words.
+```
+
+---
+
+## 14. BERTScore Evaluation
+
+Use BERTScore to measure semantic similarity.
+
+Model:
+
+```text
+microsoft/deberta-large-mnli
+```
+
+Inputs:
+
+```text
+candidate = ASR hypothesis
+reference = original clean text
+```
+
+Output:
+
+```text
+BERTScore F1
+```
+
+Use the rescaled version where possible.
+
+---
+
+## 15. Evaluation Comparison
+
+Compare two conditions:
+
+```text
+Clean synthetic speech ASR performance
+vs
+Stuttered synthetic speech ASR performance
+```
+
+Main comparison:
+
+```text
+WER_clean vs WER_stuttered
+BERTScore_clean vs BERTScore_stuttered
+```
+
+Expected pattern:
+
+```text
+WER_clean < WER_stuttered
+BERTScore_clean > BERTScore_stuttered
+```
+
+This shows how much disfluency affects ASR.
+
+---
+
+## 16. Proposed Project Structure
+
+```text
+stuttered-speech-augmentation/
+│
+├── configs/
+│   ├── base.yaml
+│   ├── augment_initial.yaml
+│   ├── augment_expanded.yaml
+│   ├── tts.yaml
+│   └── eval.yaml
+│
+├── data/
+│   ├── processed/
+│   ├── augmented/
+│   │   ├── manifests/
+│   │   └── audio/
+│   │       ├── clean/
+│   │       └── stuttered/
+│   └── eval/
+│
+├── src/
+│   ├── ingest.py
+│   ├── augment.py
+│   ├── tts.py
+│   ├── asr.py
+│   ├── evaluate.py
+│   └── utils.py
+│
+├── scripts/
+│   ├── run_ingest.sh
+│   ├── run_augment.sh
+│   ├── run_tts.sh
+│   ├── run_asr.sh
+│   └── run_eval.sh
+│
+└── outputs/
+    ├── asr_predictions/
+    ├── metrics/
+    └── reports/
+```
+
+---
+
+## 17. Implementation Steps
+
+### Step 1: Environment setup
+
+```text
+Install Python dependencies.
+Verify local GPU.
+Test HuggingFace models.
+```
+
+Main libraries:
+
+```text
+torch
+transformers
+datasets
+soundfile
+librosa
+jiwer
+bert-score
+pandas
+pyyaml
+```
+
+---
+
+### Step 2: Ingest LibriSpeech transcripts
+
+```text
+Load LibriSpeech subset.
+Extract clean transcripts.
+Filter by length.
+Save clean manifest.
+```
+
+Output:
+
+```text
+data/processed/clean_manifest.jsonl
+```
+
+---
+
+### Step 3: Build augmentation module
+
+Implement:
+
+```text
+word repetition
+phrase repetition
+interjection insertion
+randomized placement
+length-based constraints
+```
+
+Output:
+
+```text
+data/augmented/manifests/stuttered_manifest.jsonl
+```
+
+---
+
+### Step 4: Generate TTS audio
+
+Use SpeechT5 to generate:
+
+```text
+clean synthetic audio
+stuttered synthetic audio
+```
+
+Output:
+
+```text
+data/augmented/audio/clean/
+data/augmented/audio/stuttered/
+```
+
+---
+
+### Step 5: Run ASR inference
+
+Transcribe generated audio with:
+
+```text
+facebook/wav2vec2-base-960h
+```
+
+Output:
+
+```text
+outputs/asr_predictions/predictions.jsonl
+```
+
+---
+
+### Step 6: Evaluate
+
+Compute:
+
+```text
+WER
+BERTScore
+```
+
+Output:
+
+```text
+outputs/metrics/per_utterance_metrics.csv
+outputs/metrics/summary_metrics.json
+```
+
+---
+
+## 18. Example Commands
+
+```bash
+python src/ingest.py \
+  --subset dev-clean \
+  --max_samples 200
+```
+
+```bash
+python src/augment.py \
+  --config configs/augment_initial.yaml
+```
+
+```bash
+python src/tts.py \
+  --config configs/tts.yaml
+```
+
+```bash
+python src/asr.py \
+  --model facebook/wav2vec2-base-960h
+```
+
+```bash
+python src/evaluate.py \
+  --metrics wer bertscore
+```
+
+---
+
+## 19. Testing Plan
+
+Before full-scale generation, run a small test:
+
+```text
+200 clean utterances
+3 to 5 speakers
+initial augmentation ranges
+```
+
+Check:
+
+```text
+augmented text contains expected repetitions
+audio is generated successfully
+audio is not silent
+ASR produces transcripts
+WER and BERTScore are computed
+```
+
+---
+
+## 20. Expected Outputs
+
+After running the pipeline, you should have:
+
+```text
+Clean synthetic speech dataset
+Stuttered synthetic speech dataset
+Manifests with disfluency labels
+ASR predictions
+WER metrics
+BERTScore metrics
+Clean vs stuttered comparison report
+```
+
+---
+
+## 21. Future Extensions
+
+Later, you can extend this pipeline with:
+
+```text
+ASR fine-tuning on generated stuttered speech
+more disfluency types
+forced alignment for timestamp-level labels
+more realistic TTS voices
+noise augmentation
+speaker diversity expansion
+Colab scaling
+```

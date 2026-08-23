@@ -1,0 +1,35 @@
+input_manifest: data/processed/clean_manifest.jsonl
+output_manifest: data/augmented/manifests/stuttered_manifest_expanded.jsonl
+
+seed: 42
+max_augmented_samples: 6000
+
+# Maximum total tokens after augmentation.
+max_total_tokens: 90
+
+# Paper expanded ranges.
+event_probabilities:
+  word_repetition: 0.40
+  phrase_repetition: 0.30
+  interjection: 0.30
+
+word_repetition:
+  num_words_to_select_min: 1
+  num_words_to_select_max: 3
+  additional_repetitions_min: 1
+  additional_repetitions_max: 6
+
+phrase_repetition:
+  phrase_length_min: 2
+  phrase_length_max: 4
+  additional_repetitions_min: 1
+  additional_repetitions_max: 5
+
+interjection:
+  interjections:
+    - uh
+    - um
+  num_insertion_locations_min: 1
+  num_insertion_locations_max: 4
+  additional_repetitions_min: 1
+  additional_repetitions_max: 7

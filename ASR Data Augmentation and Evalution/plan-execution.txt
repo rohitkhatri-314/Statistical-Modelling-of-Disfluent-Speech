@@ -1,0 +1,1542 @@
+Below is a working starting implementation for the `plan.md`. Save each block as the file path shown above it.
+
+This implementation is intentionally simple and local-first. It avoids paid APIs and uses:
+
+- LibriSpeech transcripts as clean text input.
+- Rule-based disfluency augmentation from the paper.
+- SpeechT5 + CMU Arctic speaker embeddings for TTS.
+- `facebook/wav2vec2-base-960h` for ASR inference.
+- `jiwer` for WER.
+- `bert-score` with `microsoft/deberta-large-mnli` for BERTScore.
+
+---
+
+# 1. `requirements.txt`
+
+```txt
+torch
+torchaudio
+transformers
+datasets
+soundfile
+librosa
+jiwer
+bert-score
+pandas
+pyyaml
+numpy
+tqdm
+```
+
+---
+
+# 2. `configs/base.yaml`
+
+```yaml
+project:
+  seed: 42
+  local_gpu: true
+
+data:
+  clean_manifest: data/processed/clean_manifest.jsonl
+
+audio:
+  sample_rate: 16000
+  format: flac
+```
+
+---
+
+# 3. `configs/augment_initial.yaml`
+
+```yaml
+input_manifest: data/processed/clean_manifest.jsonl
+output_manifest: data/augmented/manifests/stuttered_manifest_initial.jsonl
+
+seed: 42
+max_augmented_samples: 200
+
+# Maximum total tokens after augmentation.
+# Helps keep SpeechT5 generation stable.
+max_total_tokens: 80
+
+# Paper initial ranges.
+event_probabilities:
+  word_repetition: 0.40
+  phrase_repetition: 0.30
+  interjection: 0.30
+
+word_repetition:
+  num_words_to_select_min: 1
+  num_words_to_select_max: 3
+  additional_repetitions_min: 1
+  additional_repetitions_max: 4
+
+phrase_repetition:
+  phrase_length_min: 2
+  phrase_length_max: 4
+  additional_repetitions_min: 1
+  additional_repetitions_max: 3
+
+interjection:
+  interjections:
+    - uh
+    - um
+  num_insertion_locations_min: 1
+  num_insertion_locations_max: 4
+  additional_repetitions_min: 1
+  additional_repetitions_max: 4
+```
+
+---
+
+# 4. `configs/augment_expanded.yaml`
+
+```yaml
+input_manifest: data/processed/clean_manifest.jsonl
+output_manifest: data/augmented/manifests/stuttered_manifest_expanded.jsonl
+
+seed: 42
+max_augmented_samples: 6000
+
+# Maximum total tokens after augmentation.
+max_total_tokens: 90
+
+# Paper expanded ranges.
+event_probabilities:
+  word_repetition: 0.40
+  phrase_repetition: 0.30
+  interjection: 0.30
+
+word_repetition:
+  num_words_to_select_min: 1
+  num_words_to_select_max: 3
+  additional_repetitions_min: 1
+  additional_repetitions_max: 6
+
+phrase_repetition:
+  phrase_length_min: 2
+  phrase_length_max: 4
+  additional_repetitions_min: 1
+  additional_repetitions_max: 5
+
+interjection:
+  interjections:
+    - uh
+    - um
+  num_insertion_locations_min: 1
+  num_insertion_locations_max: 4
+  additional_repetitions_min: 1
+  additional_repetitions_max: 7
+```
+
+---
+
+# 5. `configs/tts.yaml`
+
+```yaml
+input_manifest: data/augmented/manifests/stuttered_manifest_initial.jsonl
+output_manifest: data/augmented/manifests/audio_manifest.jsonl
+audio_dir: data/augmented/audio
+
+tts_model: microsoft/speecht5_tts
+vocoder: microsoft/speecht5_hifigan
+speaker_embeddings_dataset: Matthijs/cmu-arctic-xvectors
+speaker_embeddings_split: validation
+
+# These are common CMU Arctic speaker IDs.
+# If exact lookup fails, the code falls back to the first available embeddings.
+speaker_ids:
+  - slt
+  - bdl
+  - clb
+  - rms
+  - awb
+  - jmk
+  - ksp
+  - lnh
+
+num_speakers: 8
+sample_rate: 16000
+max_text_chars: 250
+overwrite: false
+device: auto
+```
+
+---
+
+# 6. `configs/eval.yaml`
+
+```yaml
+audio_manifest: data/augmented/manifests/audio_manifest.jsonl
+predictions_path: outputs/asr_predictions/predictions.jsonl
+metrics_dir: outputs/metrics
+
+asr_model: facebook/wav2vec2-base-960h
+bertscore_model: microsoft/deberta-large-mnli
+
+batch_size: 8
+device: auto
+
+chunk_length_s: 15
+stride_length_s: 2
+```
+
+---
+
+# 7. `src/utils.py`
+
+```python
+import json
+from pathlib import Path
+from typing import Any, Dict, Iterable, List
+
+import yaml
+
+
+def ensure_dir(path: Path) -> None:
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def load_yaml(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def read_jsonl(path: str) -> Iterable[Dict[str, Any]]:
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def write_jsonl(
+    path: str,
+    records: List[Dict[str, Any]],
+    mode: str = "w",
+) -> None:
+    ensure_dir(Path(path).parent)
+    with open(path, mode, encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+```
+
+---
+
+# 8. `src/normalize.py`
+
+```python
+import re
+
+
+def normalize_text(text: str) -> str:
+    """
+    Basic text normalization for augmentation and evaluation.
+
+    This is intentionally simple and close in spirit to the paper's
+    normalization step: lowercase and remove punctuation.
+    """
+    if text is None:
+        return ""
+
+    text = str(text).lower()
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.strip()
+
+    return text
+```
+
+---
+
+# 9. `src/ingest.py`
+
+```python
+import argparse
+from typing import Any, Dict, Iterable
+
+import datasets
+
+from normalize import normalize_text
+from utils import write_jsonl
+
+
+def load_hf_dataset_stream(
+    dataset_name: str,
+    config_name: str,
+    split: str,
+):
+    config_name = config_name if config_name else None
+
+    try:
+        ds = datasets.load_dataset(
+            dataset_name,
+            config_name,
+            split=split,
+            streaming=True,
+            trust_remote_code=True,
+        )
+    except TypeError:
+        ds = datasets.load_dataset(
+            dataset_name,
+            config_name,
+            split=split,
+            streaming=True,
+        )
+
+    return ds
+
+
+def iter_rows(
+    dataset_name: str,
+    config_name: str,
+    split: str,
+) -> Iterable[Dict[str, Any]]:
+    ds = load_hf_dataset_stream(dataset_name, config_name, split)
+    for row in ds:
+        yield row
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Ingest clean LibriSpeech transcripts."
+    )
+    parser.add_argument(
+        "--dataset",
+        default="openslr/librispeech_asr",
+        help="HuggingFace dataset name.",
+    )
+    parser.add_argument(
+        "--config",
+        default="clean.100",
+        help="HuggingFace dataset config name.",
+    )
+    parser.add_argument(
+        "--split",
+        default="validation.clean",
+        help="Dataset split.",
+    )
+    parser.add_argument(
+        "--max_samples",
+        type=int,
+        default=200,
+        help="Maximum number of clean utterances to keep.",
+    )
+    parser.add_argument(
+        "--min_words",
+        type=int,
+        default=4,
+    )
+    parser.add_argument(
+        "--max_words",
+        type=int,
+        default=30,
+    )
+    parser.add_argument(
+        "--text_field",
+        default="text",
+    )
+    parser.add_argument(
+        "--id_field",
+        default="id",
+    )
+    parser.add_argument(
+        "--output",
+        default="data/processed/clean_manifest.jsonl",
+    )
+
+    args = parser.parse_args()
+
+    records = []
+    seen = 0
+
+    for row in iter_rows(args.dataset, args.config, args.split):
+        seen += 1
+
+        raw_text = row.get(args.text_field, "")
+        normalized_text = normalize_text(raw_text)
+        words = normalized_text.split()
+
+        if len(words) < args.min_words:
+            continue
+
+        if len(words) > args.max_words:
+            continue
+
+        utterance_id = row.get(args.id_field, None)
+        if utterance_id is None:
+            utterance_id = f"utt-{len(records):06d}"
+
+        records.append(
+            {
+                "utterance_id": str(utterance_id),
+                "raw_text": raw_text,
+                "clean_text": normalized_text,
+                "source_dataset": args.dataset,
+                "source_config": args.config,
+                "source_split": args.split,
+            }
+        )
+
+        if len(records) >= args.max_samples:
+            break
+
+    write_jsonl(args.output, records)
+
+    print(f"Seen rows: {seen}")
+    print(f"Saved clean utterances: {len(records)}")
+    print(f"Output: {args.output}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 10. `src/augment.py`
+
+```python
+import argparse
+import random
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+from utils import load_yaml, read_jsonl, write_jsonl
+
+
+def clamp_int(value: int, low: int, high: int) -> int:
+    return max(low, min(highigh))
+
+
+def choose_event_type(cfg: Dict[str, Any], rng: random.Random) -> str:
+    probs = cfg.get("event_probabilities", {})
+    if not probs:
+        return rng.choice(
+            [
+                "word_repetition",
+                "phrase_repetition",
+                "interjection",
+            ]
+        )
+
+    total = float(sum(probs.values()))
+    r = rng.random() * total
+    cumulative = 0.0
+
+    for event_type, prob in probs.items():
+        cumulative += float(prob)
+        if r <= cumulative:
+            return event_type
+
+    return list(probs.keys())[-1]
+
+
+def add_word_repetition(
+    tokens: List[str],
+    cfg: Dict[str, Any],
+    rng: random.Random,
+    max_insertions: int,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    if not tokens or max_insertions <= 0:
+        return tokens, []
+
+    n = len(tokens)
+
+    num_select_min = cfg.get("num_words_to_select_min", 1)
+    num_select_max = cfg.get("num_words_to_select_max", 3)
+    rep_min = cfg.get("additional_repetitions_min", 1)
+    rep_max = cfg.get("additional_repetitions_max", 4)
+
+    num_select = rng.randint(num_select_min, num_select_max)
+    num_select = min(num_select, n)
+
+    if num_select <= 0:
+        return tokens, []
+
+    selected_indices = rng.sample(range(n), num_select)
+    selected = {}
+    remaining_insertions = max_insertions
+
+    for idx in sorted(selected_indices):
+        if remaining_insertions <= 0:
+            break
+
+        reps = rng.randint(rep_min, rep_max)
+        reps = min(reps, remaining_insertions)
+
+        if reps <= 0:
+            continue
+
+        selected[idx] = reps
+        remaining_insertions -= reps
+
+    if not selected:
+        return tokens, []
+
+    new_tokens = []
+    events = []
+
+    for i, token in enumerate(tokens):
+        if i in selected:
+            reps = selected[i]
+            new_tokens.extend([token] * (reps + 1))
+            events.append(
+                {
+                    "type": "word_repetition",
+                    "original_token_index": i,
+                    "target": token,
+                    "additional_repetitions": reps,
+                }
+            )
+        else:
+            new_tokens.append(token)
+
+    return new_tokens, events
+
+
+def add_phrase_repetition(
+    tokens: List[str],
+    cfg: Dict[str, Any],
+    rng: random.Random,
+    max_insertions: int,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    if not tokens or max_insertions <= 0:
+        return tokens, []
+
+    n = len(tokens)
+
+    phrase_len_min = cfg.get("phrase_length_min", 2)
+    phrase_len_max = cfg.get("phrase_length_max", 4)
+    rep_min = cfg.get("additional_repetitions_min", 1)
+    rep_max = cfg.get("additional_repetitions_max", 3)
+
+    phrase_len_max = min(phrase_len_max, n)
+
+    if phrase_len_min > phrase_len_max:
+        return tokens, []
+
+    phrase_len = rng.randint(phrase_len_min, phrase_len_max)
+
+    if phrase_len > n:
+        return tokens, []
+
+    start_max = n - phrase_len
+    if start_max < 0:
+        return tokens, []
+
+    start = rng.randint(0, start_max)
+
+    reps = rng.randint(rep_min, rep_max)
+
+    # Each additional phrase repetition inserts phrase_len tokens.
+    reps = min(reps, max_insertions // phrase_len)
+
+    if reps <= 0:
+        return tokens, []
+
+    phrase = tokens[start : start + phrase_len]
+
+    new_tokens = (
+        tokens[:start]
+        + phrase * (reps + 1)
+        + tokens[start + phrase_len :]
+    )
+
+    events = [
+        {
+            "type": "phrase_repetition",
+            "original_start_index": start,
+            "phrase": " ".join(phrase),
+            "phrase_length": phrase_len,
+            "additional_repetitions": reps,
+        }
+    ]
+
+    return new_tokens, events
+
+
+def add_interjections(
+    tokens: List[str],
+    cfg: Dict[str, Any],
+    rng: random.Random,
+    max_insertions: int,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    if not tokens or max_insertions <= 0:
+        return tokens, []
+
+    n = len(tokens)
+
+    interjections = cfg.get("interjections", ["uh", "um"])
+    loc_min = cfg.get("num_insertion_locations_min", 1)
+    loc_max = cfg.get("num_insertion_locations_max", 4)
+    rep_min = cfg.get("additional_repetitions_min", 1)
+    rep_max = cfg.get("additional_repetitions_max", 4)
+
+    num_locations = rng.randint(loc_min, loc_max)
+
+    # There are n + 1 possible insertion positions.
+    # Also cap by max_insertions because each location needs at least one token.
+    num_locations = min(num_locations, n + 1, max_insertions)
+
+    if num_locations <= 0:
+        return tokens, []
+
+    positions = rng.sample(range(n + 1), num_locations)
+    insert_map = {}
+    remaining_insertions = max_insertions
+
+    for pos in sorted(positions):
+        if remaining_insertions <= 0:
+            break
+
+        reps = rng.randint(rep_min, rep_max)
+        reps = min(reps, remaining_insertions)
+
+        if reps <= 0:
+            continue
+
+        interjection = rng.choice(interjections)
+        insert_map[pos] = [interjection] * reps
+        remaining_insertions -= reps
+
+    if not insert_map:
+        return tokens, []
+
+    new_tokens = []
+
+    for i in range(n + 1):
+        if i in insert_map:
+            new_tokens.extend(insert_map[i])
+        if i < n:
+            new_tokens.append(tokens[i])
+
+    events = []
+
+    for pos, inserted_tokens in insert_map.items():
+        events.append(
+            {
+                "type": "interjection",
+                "insertion_position": pos,
+                "interjection": inserted_tokens[0],
+                "repetitions": len(inserted_tokens),
+            }
+        )
+
+    return new_tokens, events
+
+
+def augment_record(
+    record: Dict[str, Any],
+    cfg: Dict[str, Any],
+    rng: random.Random,
+) -> Dict[str, Any]:
+    clean_text = record["clean_text"]
+    tokens = clean_text.split()
+
+    if len(tokens) < 2:
+        return None
+
+    max_total_tokens = cfg.get("max_total_tokens", 80)
+
+    # Paper says upper bounds are adjusted to fit short utterances.
+    # Here we cap total inserted tokens by both utterance length and
+    # maximum total token length for TTS stability.
+    max_insertions = max_total_tokens - len(tokens)
+    max_insertions = min(max_insertions, len(tokens))
+    max_insertions = max(0, max_insertions)
+
+    if max_insertions <= 0:
+        return None
+
+    event_type = choose_event_type(cfg, rng)
+
+    if event_type == "word_repetition":
+        new_tokens, events = add_word_repetition(
+            tokens,
+            cfg.get("word_repetition", {}),
+            rng,
+            max_insertions,
+        )
+    elif event_type == "phrase_repetition":
+        new_tokens, events = add_phrase_repetition(
+            tokens,
+            cfg.get("phrase_repetition", {}),
+            rng,
+            max_insertions,
+        )
+    elif event_type == "interjection":
+        new_tokens, events = add_interjections(
+            tokens,
+            cfg.get("interjection", {}),
+            rng,
+            max_insertions,
+        )
+    else:
+        return None
+
+    if not events:
+        return None
+
+    stuttered_text = " ".join(new_tokens)
+
+    if stuttered_text == clean_text:
+        return None
+
+    augmented = dict(record)
+    augmented["original_utterance_id"] = record["utterance_id"]
+    augmented["stuttered_text"] = stuttered_text
+    augmented["is_disfluent"] = True
+    augmented["disfluency_events"] = events
+    augmented["primary_disfluency_type"] = event_type
+
+    return augmented
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Augment clean transcripts with stutter-like disfluencies."
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to augmentation YAML config.",
+    )
+    args = parser.parse_args()
+
+    cfg = load_yaml(args.config)
+
+    input_manifest = cfg["input_manifest"]
+    output_manifest = cfg["output_manifest"]
+
+    seed = cfg.get("seed", 42)
+    max_augmented_samples = cfg.get("max_augmented_samples", None)
+
+    rng = random.Random(seed)
+
+    clean_records = list(read_jsonl(input_manifest))
+
+    if not clean_records:
+        raise ValueError(f"No clean records found in {input_manifest}")
+
+    target_count = max_augmented_samples or len(clean_records)
+
+    augmented_records = []
+    attempts = 0
+    max_attempts = target_count * 20 + 100
+
+    while len(augmented_records) < target_count and attempts < max_attempts:
+        attempts += 1
+
+        record = rng.choice(clean_records)
+        augmented = augment_record(record, cfg, rng)
+
+        if augmented is None:
+            continue
+
+        augmented["augmented_id"] = (
+            f"{augmented['original_utterance_id']}-"
+            f"aug-{len(augmented_records):05d}"
+        )
+
+        augmented_records.append(augmented)
+
+    write_jsonl(output_manifest, augmented_records)
+
+    print(f"Input clean records: {len(clean_records)}")
+    print(f"Generated augmented records: {len(augmented_records)}")
+    print(f"Output: {output_manifest}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 11. `src/tts.py`
+
+```python
+import argparse
+import hashlib
+import re
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import soundfile as sf
+import torch
+from datasets import load_dataset
+from transformers import (
+    SpeechT5ForTextToSpeech,
+    SpeechT5HifiGan,
+    SpeechT5Processor,
+)
+
+from utils import ensure_dir, load_yaml, read_jsonl, write_jsonl
+
+
+def safe_filename_part(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_\-]", "_", str(text))
+
+
+def stable_mod(text: str, mod: int) -> int:
+    return int(hashlib.md5(str(text).encode("utf-8")).hexdigest(), 16) % mod
+
+
+def get_device(device_setting: str) -> torch.device:
+    if device_setting == "cuda" and torch.cuda.is_available():
+        return torch.device("cuda")
+    if device_setting == "cpu":
+        return torch.device("cpu")
+
+    if device_setting == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        return torch.device("cpu")
+
+    return torch.device(device_setting)
+
+
+def load_speaker_embeddings(cfg: Dict) -> List[Tuple[str, torch.Tensor]]:
+    dataset_name = cfg.get(
+        "speaker_embeddings_dataset",
+        "Matthijs/cmu-arctic-xvectors",
+    )
+    split = cfg.get("speaker_embeddings_split", "validation")
+    requested_speaker_ids = cfg.get("speaker_ids", [])
+    num_speakers = cfg.get("num_speakers", 8)
+
+    ds = load_dataset(dataset_name, split=split)
+
+    # Remove heavy columns if present.
+    keep_cols = []
+    for col in ds.column_names:
+        if col in {"xvector", "speaker_id", "speaker", "id", "name"}:
+            keep_cols.append(col)
+
+    if keep_cols:
+        remove_cols = [col for col in ds.column_names if col not in keep_cols]
+        if remove_cols:
+            ds = ds.remove_columns(remove_cols)
+
+    def row_matches(row: Dict, speaker_id: str) -> bool:
+        for key in ["speaker_id", "speaker", "id", "name"]:
+            if key in row and str(row[key]).lower() == str(speaker_id).lower():
+                return True
+        return False
+
+    available = []
+
+    # First try requested speaker IDs.
+    for speaker_id in requested_speaker_ids:
+        row = None
+
+        for r in ds:
+            if row_matches(r, speaker_id):
+                row = r
+                break
+
+        if row is None and str(speaker_id).isdigit():
+            idx = int(speaker_id)
+            if idx < len(ds):
+                row = ds[idx]
+
+        if row is not None and "xvector" in row:
+            available.append(
+                (
+                    str(speaker_id),
+                    torch.tensor(row["xvector"]).float(),
+                )
+            )
+
+    # Fallback: use first N available speaker embeddings.
+    if not available:
+        for i, row in enumerate(ds):
+            if i >= num_speakers:
+                break
+
+            if "xvector" not in row:
+                continue
+
+            speaker_id = (
+                row.get("speaker_id")
+                or row.get("speaker")
+                or row.get("id")
+                or row.get("name")
+                or f"spk_{i}"
+            )
+
+            available.append(
+                (
+                    str(speaker_id),
+                    torch.tensor(row["xvector"]).float(),
+                )
+            )
+
+    if not available:
+        raise ValueError(
+            "Could not load speaker embeddings from "
+            f"{dataset_name} split {split}"
+        )
+
+    return available
+
+
+def synthesize_text(
+    text: str,
+    processor: SpeechT5Processor,
+    model: SpeechT5ForTextToSpeech,
+    vocoder: SpeechT5HifiGan,
+    speaker_embedding: torch.Tensor,
+    device: torch.device,
+):
+    inputs = processor(text=text, return_tensors="pt")
+    input_ids = inputs["input_ids"].to(device)
+
+    speaker_embedding = speaker_embedding.unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        speech = model.generate_speech(
+            input_ids,
+            speaker_embedding,
+            vocoder=vocoder,
+        )
+
+    return speech.cpu().numpy()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate clean and stuttered synthetic speech."
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to TTS YAML config.",
+    )
+    args = parser.parse_args()
+
+    cfg = load_yaml(args.config)
+
+    input_manifest = cfg["input_manifest"]
+    output_manifest = cfg["output_manifest"]
+    audio_dir = Path(cfg["audio_dir"])
+
+    clean_dir = audio_dir / "clean"
+    stuttered_dir = audio_dir / "stuttered"
+
+    ensure_dir(clean_dir)
+    ensure_dir(stuttered_dir)
+
+    sample_rate = cfg.get("sample_rate", 16000)
+    max_text_chars = cfg.get("max_text_chars", 250)
+    overwrite = cfg.get("overwrite", False)
+
+    device = get_device(cfg.get("device", "auto"))
+
+    print("Loading SpeechT5 models...")
+    processor = SpeechT5Processor.from_pretrained(cfg["tts_model"])
+    model = SpeechT5ForTextToSpeech.from_pretrained(cfg["tts_model"]).to(device)
+    model.eval()
+
+    vocoder = SpeechT5HifiGan.from_pretrained(cfg["vocoder"]).to(device)
+    vocoder.eval()
+
+    print("Loading speaker embeddings...")
+    speakers = load_speaker_embeddings(cfg)
+    speaker_map = {speaker_id: embedding for speaker_id, embedding in speakers}
+
+    print(f"Using {len(speakers)} speakers:")
+    for speaker_id, _ in speakers:
+        print(f"  - {speaker_id}")
+
+    audio_records = []
+
+    for record in read_jsonl(input_manifest):
+        record_id = record.get("augmented_id") or record.get("utterance_id")
+        clean_text = record.get("clean_text", "").strip()
+        stuttered_text = record.get("stuttered_text", "").strip()
+
+        if not clean_text or not stuttered_text:
+            continue
+
+        if len(clean_text) > max_text_chars or len(stuttered_text) > max_text_chars:
+            print(f"Skipping {record_id}: text too long for TTS config.")
+            continue
+
+        speaker_id = record.get("speaker_id", None)
+
+        if speaker_id not in speaker_map:
+            speaker_index = stable_mod(record_id, len(speakers))
+            speaker_id = speakers[speaker_index][0]
+
+        speaker_embedding = speaker_map[speaker_id]
+
+        safe_record_id = safe_filename_part(record_id)
+        safe_speaker_id = safe_filename_part(speaker_id)
+
+        clean_path = clean_dir / f"{safe_record_id}_clean_spk_{safe_speaker_id}.flac"
+        stuttered_path = stuttered_dir / f"{safe_record_id}_stuttered_spk_{safe_speaker_id}.flac"
+
+        try:
+            if overwrite or not clean_path.exists():
+                clean_speech = synthesize_text(
+                    clean_text,
+                    processor,
+                    model,
+                    vocoder,
+                    speaker_embedding,
+                    device,
+                )
+                sf.write(clean_path, clean_speech, sample_rate)
+                clean_duration = len(clean_speech) / sample_rate
+            else:
+                clean_duration = sf.info(clean_path).duration
+
+            if overwrite or not stuttered_path.exists():
+                stuttered_speech = synthesize_text(
+                    stuttered_text,
+                    processor,
+                    model,
+                    vocoder,
+                    speaker_embedding,
+                    device,
+                )
+                sf.write(stuttered_path, stuttered_speech, sample_rate)
+                stuttered_duration = len(stuttered_speech) / sample_rate
+            else:
+                stuttered_duration = sf.info(stuttered_path).duration
+
+            audio_records.append(
+                {
+                    "record_id": record_id,
+                    "original_utterance_id": record.get(
+                        "original_utterance_id",
+                        record.get("utterance_id"),
+                    ),
+                    "clean_text": clean_text,
+                    "stuttered_text": stuttered_text,
+                    "speaker_id": speaker_id,
+                    "clean_audio_path": str(clean_path),
+                    "stuttered_audio_path": str(stuttered_path),
+                    "clean_duration_seconds": clean_duration,
+                    "stuttered_duration_seconds": stuttered_duration,
+                    "is_disfluent": True,
+                    "disfluency_events": record.get("disfluency_events", []),
+                    "primary_disfluency_type": record.get(
+                        "primary_disfluency_type",
+                        None,
+                    ),
+                }
+            )
+
+        except Exception as e:
+            print(f"Failed TTS for {record_id}: {e}")
+            continue
+
+    write_jsonl(output_manifest, audio_records)
+
+    print(f"Generated/verified audio records: {len(audio_records)}")
+    print(f"Audio manifest: {output_manifest}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 12. `src/asr.py`
+
+```python
+import argparse
+from pathlib import Path
+from typing import Dict
+
+import torch
+from transformers import pipeline
+
+from normalize import normalize_text
+from utils import ensure_dir, load_yaml, read_jsonl, write_jsonl
+
+
+def get_torch_device(device_setting: str) -> int:
+    if device_setting == "cuda":
+        return 0 if torch.cuda.is_available() else -1
+
+    if device_setting == "cpu":
+        return -1
+
+    # auto
+    return 0 if torch.cuda.is_available() else -1
+
+
+def create_asr_pipeline(cfg: Dict):
+    asr_model = cfg["asr_model"]
+    device = get_torch_device(cfg.get("device", "auto"))
+
+    chunk_length_s = cfg.get("chunk_length_s", 15)
+    stride_length_s = cfg.get("stride_length_s", 2)
+
+    try:
+        asr = pipeline(
+            "automatic-speech-recognition",
+            model=asr_model,
+            device=device,
+            chunk_length_s=chunk_length_s,
+            stride_length_s=stride_length_s,
+        )
+    except TypeError:
+        asr = pipeline(
+            "automatic-speech-recognition",
+            model=asr_model,
+            device=device,
+        )
+
+    return asr
+
+
+def transcribe_audio(asr, audio_path: str) -> str:
+    result = asr(str(audio_path))
+    if isinstance(result, dict):
+        return result.get("text", "")
+    return ""
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run ASR inference on generated clean and stuttered audio."
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to evaluation YAML config.",
+    )
+    args = parser.parse_args()
+
+    cfg = load_yaml(args.config)
+
+    audio_manifest = cfg["audio_manifest"]
+    predictions_path = cfg["predictions_path"]
+
+    ensure_dir(Path(predictions_path).parent)
+
+    print("Loading ASR pipeline...")
+    asr = create_asr_pipeline(cfg)
+
+    predictions = []
+
+    for record in read_jsonl(audio_manifest):
+        record_id = record["record_id"]
+        clean_text = record.get("clean_text", "")
+        stuttered_text = record.get("stuttered_text", "")
+        speaker_id = record.get("speaker_id", "")
+
+        clean_audio_path = record.get("clean_audio_path")
+        stuttered_audio_path = record.get("stuttered_audio_path")
+
+        if clean_audio_path and Path(clean_audio_path).exists():
+            hypothesis_raw = transcribe_audio(asr, clean_audio_path)
+            hypothesis = normalize_text(hypothesis_raw)
+
+            predictions.append(
+                {
+                    "record_id": record_id,
+                    "variant": "clean",
+                    "speaker_id": speaker_id,
+                    "audio_path": clean_audio_path,
+                    "reference_clean_text": clean_text,
+                    "intended_text": clean_text,
+                    "hypothesis_raw": hypothesis_raw,
+                    "hypothesis": hypothesis,
+                }
+            )
+        else:
+            print(f"Missing clean audio for {record_id}")
+
+        if stuttered_audio_path and Path(stuttered_audio_path).exists():
+            hypothesis_raw = transcribe_audio(asr, stuttered_audio_path)
+            hypothesis = normalize_text(hypothesis_raw)
+
+            predictions.append(
+                {
+                    "record_id": record_id,
+                    "variant": "stuttered",
+                    "speaker_id": speaker_id,
+                    "audio_path": stuttered_audio_path,
+                    "reference_clean_text": clean_text,
+                    "intended_text": stuttered_text,
+                    "hypothesis_raw": hypothesis_raw,
+                    "hypothesis": hypothesis,
+                }
+            )
+        else:
+            print(f"Missing stuttered audio for {record_id}")
+
+    write_jsonl(predictions_path, predictions)
+
+    print(f"Saved ASR predictions: {len(predictions)}")
+    print(f"Output: {predictions_path}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 13. `src/evaluate.py`
+
+```python
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, List
+
+import jiwer
+import numpy as np
+import pandas as pd
+from bert_score import score as bert_score
+
+from normalize import normalize_text
+from utils import ensure_dir, load_yaml, read_jsonl
+
+
+def compute_wer_metrics(reference: str, hypothesis: str) -> Dict[str, float]:
+    reference = normalize_text(reference)
+    hypothesis = normalize_text(hypothesis)
+
+    if not reference:
+        return {
+            "wer": 0.0 if not hypothesis else 1.0,
+            "substitutions": 0.0,
+            "deletions": 0.0,
+            "insertions": float(len(hypothesis.split())) if hypothesis else 0.0,
+            "hits": 0.0,
+        }
+
+    measures = jiwer.compute_measures(reference, hypothesis)
+
+    return {
+        "wer": float(measures["wer"]),
+        "substitutions": float(measures["substitutions"]),
+        "deletions": float(measures["deletions"]),
+        "insertions": float(measures["insertions"]),
+        "hits": float(measures["hits"]),
+    }
+
+
+def compute_bertscores(
+    references: List[str],
+    candidates: List[str],
+    model_type: str,
+    batch_size: int,
+) -> List[float]:
+    scores = []
+
+    references = [r if r.strip() else " " for r in references]
+    candidates = [c if c.strip() else " " for c in candidates]
+
+    for i in range(0, len(references), batch_size):
+        ref_batch = references[i : i + batch_size]
+        cand_batch = candidates[i : i + batch_size]
+
+        _, _, f_scores = bert_score(
+            cand_batch,
+            ref_batch,
+            model_type=model_type,
+            lang="en",
+            rescale_with_layers=True,
+            verbose=False,
+        )
+
+        scores.extend(f_scores.tolist())
+
+    return scores
+
+
+def json_default(obj):
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    return str(obj)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Compute WER and BERTScore for ASR predictions."
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to evaluation YAML config.",
+    )
+    args = parser.parse_args()
+
+    cfg = load_yaml(args.config)
+
+    predictions_path = cfg["predictions_path"]
+    metrics_dir = Path(cfg["metrics_dir"])
+    bertscore_model = cfg.get("bertscore_model", "microsoft/deberta-large-mnli")
+    batch_size = cfg.get("batch_size", 8)
+
+    ensure_dir(metrics_dir)
+
+    predictions = list(read_jsonl(predictions_path))
+
+    if not predictions:
+        raise ValueError(f"No predictions found in {predictions_path}")
+
+    references = []
+    candidates = []
+
+    for pred in predictions:
+        reference = normalize_text(pred.get("reference_clean_text", ""))
+        hypothesis = normalize_text(pred.get("hypothesis", ""))
+
+        references.append(reference)
+        candidates.append(hypothesis)
+
+    print("Computing WER...")
+    wer_records = []
+
+    for pred, reference, hypothesis in zip(predictions, references, candidates):
+        wer_metrics = compute_wer_metrics(reference, hypothesis)
+
+        wer_records.append(
+            {
+                "record_id": pred.get("record_id"),
+                "variant": pred.get("variant"),
+                "speaker_id": pred.get("speaker_id"),
+                "reference_clean_text": reference,
+                "hypothesis": hypothesis,
+                **wer_metrics,
+            }
+        )
+
+    print("Computing BERTScore...")
+    bert_scores = compute_bertscores(
+        references=references,
+        candidates=candidates,
+        model_type=bertscore_model,
+        batch_size=batch_size,
+    )
+
+    for record, fbert in zip(wer_records, bert_scores):
+        record["fbert"] = float(fbert)
+
+    df = pd.DataFrame(wer_records)
+
+    per_utterance_path = metrics_dir / "per_utterance_metrics.csv"
+    df.to_csv(per_utterance_path, index=False)
+
+    summary = {
+        "num_predictions": int(len(df)),
+        "by_variant": {},
+    }
+
+    for variant, group in df.groupby("variant"):
+        summary["by_variant"][str(variant)] = {
+            "mean_wer": float(group["wer"].mean()),
+            "mean_fbert": float(group["fbert"].mean()),
+            "count": int(len(group)),
+        }
+
+    clean_df = df[df["variant"] == "clean"].set_index("record_id")
+    stuttered_df = df[df["variant"] == "stuttered"].set_index("record_id")
+
+    common_ids = clean_df.index.intersection(stuttered_df.index)
+
+    if len(common_ids) > 0:
+        delta_wer = (
+            stuttered_df.loc[common_ids, "wer"]
+            - clean_df.loc[common_ids, "wer"]
+        ).mean()
+
+        delta_fbert = (
+            stuttered_df.loc[common_ids, "fbert"]
+            - clean_df.loc[common_ids, "fbert"]
+        ).mean()
+
+        summary["paired_comparison"] = {
+            "num_pairs": int(len(common_ids)),
+            "mean_delta_wer": float(delta_wer),
+            "mean_delta_fbert": float(delta_fbert),
+        }
+
+    summary_path = metrics_dir / "summary_metrics.json"
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False, default=json_default)
+
+    print(f"Saved per-utterance metrics: {per_utterance_path}")
+    print(f"Saved summary metrics: {summary_path}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 14. `scripts/run_ingest.sh`
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+python src/ingest.py \
+  --dataset openslr/librispeech_asr \
+  --config clean.100 \
+  --split validation.clean \
+  --max_samples 200 \
+  --min_words 4 \
+  --max_words 30 \
+  --output data/processed/clean_manifest.jsonl
+```
+
+---
+
+# 15. `scripts/run_augment.sh`
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+python src/augment.py \
+  --config configs/augment_initial.yaml
+```
+
+---
+
+# 16. `scripts/run_tts.sh`
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+python src/tts.py \
+  --config configs/tts.yaml
+```
+
+---
+
+# 17. `scripts/run_asr.sh`
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+python src/asr.py \
+  --config configs/eval.yaml
+```
+
+---
+
+# 18. `scripts/run_eval.sh`
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+python src/evaluate.py \
+  --config configs/eval.yaml
+```
+
+---
+
+# 19. `scripts/run_all.sh`
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+bash scripts/run_ingest.sh
+bash scripts/run_augment.sh
+bash scripts/run_tts.sh
+bash scripts/run_asr.sh
+bash scripts/run_eval.sh
+```
+
+---
+
+# 20. `README.md`
+
+```markdown
+# Stuttered Speech Augmentation Pipeline
+
+Local pipeline for generating synthetic stuttered speech from clean LibriSpeech transcripts and evaluating it with ASR, WER, and BERTScore.
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Run small test pipeline
+
+```bash
+bash scripts/run_all.sh
+```
+
+## Outputs
+
+```text
+data/processed/clean_manifest.jsonl
+data/augmented/manifests/stuttered_manifest_initial.jsonl
+data/augmented/manifests/audio_manifest.jsonl
+data/augmented/audio/clean/
+data/augmented/audio/stuttered/
+outputs/asr_predictions/predictions.jsonl
+outputs/metrics/per_utterance_metrics.csv
+outputs/metrics/summary_metrics.json
+```
+
+## Notes
+
+- The default ingestion uses a small LibriSpeech validation subset.
+- For larger experiments, increase `--max_samples` in `scripts/run_ingest.sh`.
+- For expanded augmentation, run:
+
+```bash
+python src/augment.py --config configs/augment_expanded.yaml
+```
+
+Then update `configs/tts.yaml` to point to:
+
+```text
+data/augmented/manifests/stuttered_manifest_expanded.jsonl
+```
+```
+
+---
+
+# Quick Usage
+
+From the project root, run:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+bash scripts/run_all.sh
+```
+
+This will create:
+
+```text
+data/processed/clean_manifest.jsonl
+data/augmented/manifests/stuttered_manifest_initial.jsonl
+data/augmented/manifests/audio_manifest.jsonl
+data/augmented/audio/clean/
+data/augmented/audio/stuttered/
+outputs/asr_predictions/predictions.jsonl
+outputs/metrics/per_utterance_metrics.csv
+outputs/metrics/summary_metrics.json
+```

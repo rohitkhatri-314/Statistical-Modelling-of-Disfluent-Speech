@@ -1,0 +1,26 @@
+input_manifest: data/augmented/manifests/stuttered_manifest_initial.jsonl
+output_manifest: data/augmented/manifests/audio_manifest.jsonl
+audio_dir: data/augmented/audio
+
+tts_model: microsoft/speecht5_tts
+vocoder: microsoft/speecht5_hifigan
+speaker_embeddings_dataset: Matthijs/cmu-arctic-xvectors
+speaker_embeddings_split: validation
+
+# These are common CMU Arctic speaker IDs.
+# If exact lookup fails, the code falls back to the first available embeddings.
+speaker_ids:
+  - slt
+  - bdl
+  - clb
+  - rms
+  - awb
+  - jmk
+  - ksp
+  - lnh
+
+num_speakers: 8
+sample_rate: 16000
+max_text_chars: 250
+overwrite: false
+device: auto

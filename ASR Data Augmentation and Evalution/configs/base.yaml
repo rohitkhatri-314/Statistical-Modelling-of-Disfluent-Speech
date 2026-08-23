@@ -1,0 +1,10 @@
+project:
+  seed: 42
+  local_gpu: true
+
+data:
+  clean_manifest: data/processed/clean_manifest.jsonl
+
+audio:
+  sample_rate: 16000
+  format: flac
