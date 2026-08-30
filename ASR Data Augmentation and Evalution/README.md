@@ -33,13 +33,13 @@ pip install -r requirements.txt
 
 ### 2. How to Run the Pipeline
 
-The easiest way to run the entire process from start to finish is using the provided `run_all.sh` shell script. If you are on Windows, you can use Git Bash or WSL to run the `.sh` files, or simply run the python commands found inside the scripts.
+The easiest way to run the entire process from start to finish is using the provided `run_all.ps1` PowerShell script.
 
 #### Option A: Run Everything Automatically
 
-```bash
+```powershell
 # This will run data download, augmentation, TTS, ASR, and Evaluation sequentially
-bash scripts/run_all.sh
+.\scripts\run_all.ps1
 ```
 
 #### Option B: Run Step-by-Step
@@ -47,32 +47,32 @@ bash scripts/run_all.sh
 If you want to see what happens at each step, you can run them one by one.
 
 **1. Get Clean Data:** 
-```bash
-bash scripts/run_ingest.sh
+```powershell
+.\scripts\run_ingest.ps1
 ```
 *(Saves clean transcripts in `data/processed/clean_manifest.jsonl`)*
 
 **2. Add Stuttering (Augment):** 
-```bash
-bash scripts/run_augment.sh
+```powershell
+.\scripts\run_augment.ps1
 ```
 *(Saves the stuttered text versions in `data/augmented/manifests/stuttered_manifest_initial.jsonl`)*
 
 **3. Generate Audio (TTS):** 
-```bash
-bash scripts/run_tts.sh
+```powershell
+.\scripts\run_tts.ps1
 ```
 *(Creates `.flac` audio files for clean and stuttered speech in `data/augmented/audio/`)*
 
 **4. Transcribe Audio (ASR Inference):** 
-```bash
-bash scripts/run_asr.sh
+```powershell
+.\scripts\run_asr.ps1
 ```
 *(Saves the ASR model's text predictions in `outputs/asr_predictions/predictions.jsonl`)*
 
 **5. Evaluate Results:** 
-```bash
-bash scripts/run_eval.sh
+```powershell
+.\scripts\run_eval.ps1
 ```
 *(Calculates metrics and saves reports in `outputs/metrics/`)*
 
@@ -88,7 +88,7 @@ After the pipeline finishes, you'll be able to find your results here:
 
 By default, the pipeline runs a small test batch to make sure everything works quickly. If you want to run a larger experiment:
 
-1. Open `scripts/run_ingest.sh` and increase the `--max_samples` value.
+1. Open `scripts/run_ingest.ps1` and increase the `--max_samples` value.
 2. If you want a more extreme stuttering effect, run the expanded augmentation config instead of the initial one:
    ```bash
    python src/augment.py --config configs/augment_expanded.yaml

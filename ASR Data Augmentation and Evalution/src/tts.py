@@ -47,72 +47,57 @@ def load_speaker_embeddings(cfg: Dict) -> List[Tuple[str, torch.Tensor]]:
     requested_speaker_ids = cfg.get("speaker_ids", [])
     num_speakers = cfg.get("num_speakers", 8)
 
-    ds = load_dataset(dataset_name, split=split)
-
-    # Remove heavy columns if present.
-    keep_cols = []
-    for col in ds.column_names:
-        if col in {"xvector", "speaker_id", "speaker", "id", "name"}:
-            keep_cols.append(col)
-
-    if keep_cols:
-        remove_cols = [col for col in ds.column_names if col not in keep_cols]
-        if remove_cols:
-            ds = ds.remove_columns(remove_cols)
-
-    def row_matches(row: Dict, speaker_id: str) -> bool:
-        for key in ["speaker_id", "speaker", "id", "name"]:
-            if key in row and str(row[key]).lower() == str(speaker_id).lower():
-                return True
-        return False
-
     available = []
 
-    # First try requested speaker IDs.
-    for speaker_id in requested_speaker_ids:
-        row = None
+    try:
+        ds = load_dataset(dataset_name, split=split)
+        
+        # Remove heavy columns if present.
+        keep_cols = []
+        for col in ds.column_names:
+            if col in {"xvector", "speaker_id", "speaker", "id", "name"}:
+                keep_cols.append(col)
 
-        for r in ds:
-            if row_matches(r, speaker_id):
-                row = r
-                break
+        if keep_cols:
+            remove_cols = [col for col in ds.column_names if col not in keep_cols]
+            if remove_cols:
+                ds = ds.remove_columns(remove_cols)
 
-        if row is None and str(speaker_id).isdigit():
-            idx = int(speaker_id)
-            if idx < len(ds):
-                row = ds[idx]
-
-        if row is not None and "xvector" in row:
-            available.append(
-                (
-                    str(speaker_id),
-                    torch.tensor(row["xvector"]).float(),
-                )
-            )
-
-    # Fallback: use first N available speaker embeddings.
-    if not available:
+        # Fallback: use first N available speaker embeddings.
         for i, row in enumerate(ds):
             if i >= num_speakers:
                 break
-
             if "xvector" not in row:
                 continue
+            speaker_id = row.get("speaker_id") or row.get("speaker") or f"spk_{i}"
+            available.append((str(speaker_id), torch.tensor(row["xvector"]).float()))
 
-            speaker_id = (
-                row.get("speaker_id")
-                or row.get("speaker")
-                or row.get("id")
-                or row.get("name")
-                or f"spk_{i}"
-            )
-
-            available.append(
-                (
-                    str(speaker_id),
-                    torch.tensor(row["xvector"]).float(),
-                )
-            )
+    except Exception:
+        # Fallback to direct zip download if dataset script fails (datasets >= 3.0)
+        import urllib.request
+        import zipfile
+        import io
+        import numpy as np
+        
+        print("Falling back to downloading zip file directly...")
+        url = f"https://huggingface.co/datasets/{dataset_name}/resolve/main/spkrec-xvect.zip"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            with zipfile.ZipFile(io.BytesIO(response.read())) as z:
+                # Group by speaker prefix
+                speaker_files = {}
+                for name in z.namelist():
+                    if name.endswith(".npy"):
+                        # example: spkrec-xvect/cmu_us_jmk_arctic-wav-arctic_a0219.npy
+                        spk = name.split("/")[-1].split("-")[0]
+                        if spk not in speaker_files:
+                            speaker_files[spk] = name
+                
+                # Load first num_speakers
+                for spk, name in list(speaker_files.items())[:num_speakers]:
+                    with z.open(name) as f:
+                        arr = np.load(f)
+                        available.append((spk, torch.tensor(arr).float()))
 
     if not available:
         raise ValueError(
