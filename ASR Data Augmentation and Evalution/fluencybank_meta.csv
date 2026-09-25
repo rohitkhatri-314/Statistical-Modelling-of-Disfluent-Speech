@@ -1,0 +1,4 @@
+utterance_id,speaker_id,audio_path,clean_text,stuttered_text
+fb_001,speaker_A,data/raw/fluencybank/fb_001.wav,this is a test,th- this is a test
+fb_002,speaker_A,data/raw/fluencybank/fb_002.wav,I am going to the store,I I am going to the store
+fb_003,speaker_B,data/raw/fluencybank/fb_003.wav,hello world,h- hello world

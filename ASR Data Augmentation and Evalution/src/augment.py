@@ -7,7 +7,7 @@ from utils import load_yaml, read_jsonl, write_jsonl
 
 
 def clamp_int(value: int, low: int, high: int) -> int:
-    return max(low, min(highigh))
+    return max(low, min(high, value))
 
 
 def choose_event_type(cfg: Dict[str, Any], rng: random.Random) -> str:

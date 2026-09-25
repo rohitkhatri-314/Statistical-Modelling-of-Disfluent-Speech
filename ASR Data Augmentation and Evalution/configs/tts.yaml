@@ -7,11 +7,14 @@ vocoder: microsoft/speecht5_hifigan
 speaker_embeddings_dataset: Matthijs/cmu-arctic-xvectors
 speaker_embeddings_split: validation
 
+provider: "xtts"
+xtts_model: "tts_models/multilingual/multi-dataset/xtts_v2"
+xtts_language: "en"
 # These are common CMU Arctic speaker IDs.
 # If exact lookup fails, the code falls back to the first available embeddings.
 speaker_ids:
   - slt
-  - bdl
+  - bdl 
   - clb
   - rms
   - awb

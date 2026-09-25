@@ -25,14 +25,14 @@ def compute_wer_metrics(reference: str, hypothesis: str) -> Dict[str, float]:
             "hits": 0.0,
         }
 
-    measures = jiwer.compute_measures(reference, hypothesis)
+    out = jiwer.process_words(reference, hypothesis)
 
     return {
-        "wer": float(measures["wer"]),
-        "substitutions": float(measures["substitutions"]),
-        "deletions": float(measures["deletions"]),
-        "insertions": float(measures["insertions"]),
-        "hits": float(measures["hits"]),
+        "wer": float(out.wer),
+        "substitutions": float(out.substitutions),
+        "deletions": float(out.deletions),
+        "insertions": float(out.insertions),
+        "hits": float(out.hits),
     }
 
 
@@ -56,7 +56,7 @@ def compute_bertscores(
             ref_batch,
             model_type=model_type,
             lang="en",
-            rescale_with_layers=True,
+            rescale_with_baseline=True,
             verbose=False,
         )
 

@@ -45,8 +45,12 @@ def create_asr_pipeline(cfg: Dict):
     return asr
 
 
+import soundfile as sf
+
 def transcribe_audio(asr, audio_path: str) -> str:
-    result = asr(str(audio_path))
+    # Use soundfile to load the audio to bypass the ffmpeg dependency
+    audio_data, sr = sf.read(str(audio_path))
+    result = asr({"raw": audio_data, "sampling_rate": sr})
     if isinstance(result, dict):
         return result.get("text", "")
     return ""
