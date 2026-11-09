@@ -1,0 +1,18 @@
+This dataset includes audio segments from FluencyBank as well as updated timestamped transcripts and disfluency labels for the following classes: filled pauses, repetitions,  revisions, and partial words.
+
+This dataset format aims to facilitate speech processing research involving speech from people who stutter. Our intended use cases include exploring and improving automatic speech recognition accuracy, as well as investigating methods to detect disfluencies from transcripts or audio.
+
+Contents:
+- metadata.csv: The defined segments with start and end times which correspond to the raw FluencyBank interview files. This file also includes verbatim transcripts (all spoken words, including disfluencies) and intended speech transcripts (fluent spoken words) corresponding to each segment.
+- wavs: Audio for each segment (44.1 kHz, 16-bit, Stereo, WAV). These audio segments were extracted from the raw interviews based on the start and end times in metadata.csv and each file has 50 ms of silence added to the beginning and end.
+- csvs: Data csvs for each segment. Each row contains a word in the segment, and the columns pertain to the word start time (in seconds, relative to the audio segment), word end time, and binary disfluency labels: filled pause (fp), repetition (rp), revision (rv), or partial word (pw).
+
+Details on these dataset updates can be found here:
+Romana, A., Niu, M., Perez, M., and Mower Provost, E. (2024). FluencyBank Timestamped: An Updated Dataset for Disfluency Detection and Automatic Intended Speech Recognition. In Journal of Speech, Language, and Hearing Research.
+
+Limitations and important considerations:
+- Transcripts: These transcripts were generated via the RevPro transcription service and have been reviewed for accuracy. While they generally reflected the audio, there may be transcription mistakes particularly for participants who speak with higher rates of disfluencies.
+- Timestamps: The timestamps were initially generated using Gentle forced alignment. However, we found that common forced alignment methods struggled to align disfluencies, and as a result we followed the automatic alignment with manual review and adjustments. Again, there may be timestamp errors particularly for participants who speak with higher rates of disfluencies.
+- Disfluency labels: The current labels focus on typical disfluencies and sound repetitions (repetition + partial word intersection). Our initial analysis showed that these disfluency types were especially common and hindered speech technologies. However, we recognize that this dataset would benefit from labels for stuttering-specific disfluencies and we hope future researchers will consider contributing these labels (such as for broken words or prolonged sounds).
+
+Please reach out to Amrit Romana (aromana@umich.edu) with any dataset questions, comments, or updates.

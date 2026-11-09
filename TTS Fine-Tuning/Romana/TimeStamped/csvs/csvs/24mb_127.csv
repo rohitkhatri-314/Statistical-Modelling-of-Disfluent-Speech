@@ -1,0 +1,5 @@
+,segid,wordstart,wordend,word,fp,rp,rv,pw
+0,24mb_127,0.05,0.2,that,0,0,0,0
+1,24mb_127,0.2,0.34,there's,0,0,0,0
+2,24mb_127,0.34,0.58,nothing,0,0,0,0
+3,24mb_127,0.58,1.04,wrong,0,0,0,0

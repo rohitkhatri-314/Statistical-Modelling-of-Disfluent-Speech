@@ -1,0 +1,5 @@
+,segid,wordstart,wordend,word,fp,rp,rv,pw
+0,50fb_067,0.05,0.33,do,0,0,0,0
+1,50fb_067,0.33,0.64,not,0,0,0,0
+2,50fb_067,0.7,1.43,interrupt,0,0,0,0
+3,50fb_067,1.45,1.99,them,0,0,0,0

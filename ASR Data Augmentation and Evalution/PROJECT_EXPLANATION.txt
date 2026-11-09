@@ -1,0 +1,116 @@
+============================================================
+  ASR DATA AUGMENTATION AND EVALUATION - PROJECT EXPLAINED
+============================================================
+
+WHAT IS THIS PROJECT ABOUT?
+----------------------------
+Goal: Make speech recognition (ASR) models work better for people who stutter.
+Paper being replicated: "Inclusive ASR for Disfluent Speech" (Interspeech 2024)
+
+The problem: Standard ASR models (like wav2vec2) are trained on clean speech.
+When a person who stutters speaks, the model makes many more errors.
+This project proves that gap exists AND then tries to fix it by fine-tuning the model.
+
+
+THE PIPELINE (step by step)
+----------------------------
+
+STEP 1 - INGEST (src/ingest.py)
+  - Downloads the LibriSpeech dataset (clean English speech transcripts)
+  - Only downloads the small text files, NOT the heavy audio (saves space)
+  - Filters sentences to be between 4-30 words
+  - Saves 200 clean utterances to: data/processed/clean_manifest.jsonl
+
+STEP 2 - AUGMENT (src/augment.py)
+  - Takes the clean text sentences from Step 1
+  - Artificially adds stutter patterns to the text:
+      * Word repetition   -> "I I I went to the store"
+      * Phrase repetition -> "I went I went to the store"
+      * Interjections     -> "I um uh went to the store"
+  - Saves the augmented (stuttered) text to: data/augmented/manifests/
+
+STEP 3 - TEXT TO SPEECH / TTS (src/tts.py)
+  - Takes BOTH clean and stuttered text from Step 2
+  - Converts them to audio (WAV/FLAC files) using a TTS model
+  - Supports multiple TTS engines: SpeechT5 (free), OpenAI TTS, ElevenLabs, XTTS
+  - Uses different "speaker voices" per speaker ID for realism
+  - Saves audio pairs: one clean version + one stuttered version per sentence
+
+STEP 4 - ASR INFERENCE (src/asr.py)
+  - Loads the pre-trained wav2vec2 model (facebook/wav2vec2-base-960h)
+  - Runs it on BOTH the clean and stuttered audio from Step 3
+  - Records what the model "heard" (its transcription / hypothesis)
+  - Saves predictions to: outputs/asr_predictions/predictions.jsonl
+
+STEP 5 - EVALUATE (src/evaluate.py)
+  - Compares ASR output vs. the true clean text
+  - Computes two metrics:
+      * WER  (Word Error Rate)   - lower is better, 0 is perfect
+      * BERTScore (fBERT)        - higher is better, measures meaning similarity
+  - Computes "delta" (difference between clean audio WER vs stuttered audio WER)
+  - A large delta proves the model is BIASED against stuttered speech
+  - Saves results to: outputs/metrics/summary_metrics.json
+
+
+ADDITIONAL COMPONENTS
+---------------------
+
+src/normalize.py
+  - Cleans up text (removes punctuation, lowercases, etc.)
+  - Used by almost every other script for consistency
+
+src/utils.py
+  - Shared helper functions (read/write JSONL files, load YAML configs, etc.)
+
+src/ingest_fluencybank.py
+  - Same as ingest.py but for REAL stuttered speech (FluencyBank dataset)
+  - Reads a CSV of real audio file paths and transcripts
+  - Converts them to the JSONL manifest format the pipeline needs
+
+src/finetune.py
+  - THE MAIN CONTRIBUTION of the paper
+  - Fine-tunes the wav2vec2 model on the augmented stuttered audio from Step 3
+  - After training, the model should have a LOWER WER on stuttered speech
+  - Saves the fine-tuned model to: outputs/wav2vec2-stuttered/
+
+configs/
+  - YAML files that control settings for each script
+  - base.yaml          -> shared settings (model name, device, paths)
+  - augment_initial.yaml   -> settings for Step 2 (how many stutters to add)
+  - tts.yaml           -> settings for Step 3 (which TTS engine to use)
+  - eval.yaml          -> settings for Steps 4 & 5 (paths to predictions)
+  - tts_fluencybank_n.yaml -> generates clean synthetic versions of real FluencyBank audio
+
+scripts/
+  - PowerShell scripts that run the full pipeline automatically
+  - run_all.ps1 -> runs Steps 1 to 5 in one go
+
+
+WHAT HAS BEEN DONE (COMPLETED)
+-------------------------------
+[DONE] Step 1: LibriSpeech ingestion (data/processed/clean_manifest.jsonl exists)
+[DONE] Step 2: Text augmentation (augmented manifests exist in data/augmented/)
+[DONE] Step 3: TTS audio generation (audio files generated)
+[DONE] Step 4: ASR inference (predictions.jsonl exists)
+[DONE] Step 5: Evaluation (summary_metrics.json exists)
+[DONE] Bug fixes: augment.py clamp_int, evaluate.py BERTScore param, ingest.py speaker_id
+
+
+WHAT STILL NEEDS TO BE DONE
+-----------------------------
+[TODO] Obtain FluencyBank dataset (requires email request to talkbank@cmu.edu)
+[TODO] Fill fluencybank_meta.csv with real data (use scripts/extract_fluencybank.py)
+[TODO] Run ingest_fluencybank.py to create the real-data manifest
+[TODO] Run tts.py with tts_fluencybank_n.yaml to generate FluencyBank-N dataset
+[TODO] Run asr.py + evaluate.py on FluencyBank data
+[TODO] Run finetune.py to fine-tune the model
+[TODO] Re-evaluate fine-tuned model to show WER improvement
+
+
+KEY OUTPUT FILES TO SHOW YOUR PROFESSOR
+-----------------------------------------
+- outputs/metrics/summary_metrics.json  -> shows "mean_delta_wer" proving ASR bias
+- outputs/asr_predictions/predictions.jsonl -> raw ASR outputs
+- outputs/wav2vec2-stuttered/ (after fine-tuning) -> the improved model
+
+============================================================

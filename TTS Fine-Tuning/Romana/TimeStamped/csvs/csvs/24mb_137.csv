@@ -1,0 +1,5 @@
+,segid,wordstart,wordend,word,fp,rp,rv,pw
+0,24mb_137,0.05,0.61,whatever,0,0,0,0
+1,24mb_137,0.84,1.12,that,0,0,0,0
+2,24mb_137,1.12,1.27,may,0,0,0,0
+3,24mb_137,1.27,1.62,be,0,0,0,0
