@@ -1,4 +1,3 @@
-
 import argparse
 import csv
 import json
@@ -13,65 +12,101 @@ from pathlib import Path
 # SPEAKER_OVERRIDES = {"24fa": "participant_24", "24fb": "participant_24"}
 SPEAKER_OVERRIDES = {}
 
+# XTTS fine-tuning audio specifications
 SAMPLE_RATE = 22050
 MIN_CLIP_DURATION = 0.5
+MAX_CLIP_DURATION = 11.6
 EVAL_RATIO = 0.15
 RANDOM_SEED = 42
 
-# CHAT timestamp format: 0x15 start_end 0x15
-TIMESTAMP_RE = re.compile(r"\x15\s*(\d+)_(\d+)\s*\x15")
-TIER_RE = re.compile(r"(?m)^\*([^\s:]+):\s*")
 UNINTELLIGIBLE_RE = re.compile(r"\b(?:xxx|yyy|www)\b", re.I)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Prepare XTTS dataset with disfluent verbatim transcripts from FluencyBank Romana metadata."
+    )
 
-    parser.add_argument("--wav-dir", required=True, type=Path)
-    parser.add_argument("--cha-dir", required=True, type=Path)
+    parser.add_argument(
+        "--metadata-csv",
+        type=Path,
+        default=Path("Romana/TimeStamped/metadata.csv"),
+        help="Path to Romana TimeStamped metadata.csv containing verbatim transcripts and timestamps."
+    )
+    parser.add_argument(
+        "--wav-dir",
+        type=Path,
+        default=Path("WAVs"),
+        help="Directory containing full raw interview WAV recordings."
+    )
+    parser.add_argument(
+        "--cha-dir",
+        type=Path,
+        default=Path("CHAs"),
+        help="Directory containing CHAT .cha transcript files (used for speaker demographics)."
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("XTTS_dataset")
+        default=Path("dataset_disfluent"),
+        help="Output directory for XTTS dataset."
     )
-    parser.add_argument("--padding", type=float, default=0.0)
-    parser.add_argument("--eval-ratio", type=float, default=EVAL_RATIO)
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--min-duration",
+        type=float,
+        default=MIN_CLIP_DURATION,
+        help="Minimum clip duration in seconds (XTTS minimum accepted is 0.5s)."
+    )
+    parser.add_argument(
+        "--max-duration",
+        type=float,
+        default=MAX_CLIP_DURATION,
+        help="Maximum clip duration in seconds (XTTS training token limit is ~11.6s)."
+    )
+    parser.add_argument(
+        "--padding",
+        type=float,
+        default=0.0,
+        help="Optional padding in seconds added to both ends of each segment."
+    )
+    parser.add_argument(
+        "--eval-ratio",
+        type=float,
+        default=EVAL_RATIO,
+        help="Proportion of data allocated to evaluation set (default: 0.15)."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simulate dataset processing without cutting audio files."
+    )
 
     return parser.parse_args()
 
 
 def find_files(folder, extension):
-    """Find files recursively and match them using filename stems."""
-
+    """Find files recursively and match them using lowercase filename stems."""
     files = {}
+    if not folder.is_dir():
+        return files
 
     for path in folder.rglob("*"):
         if path.is_file() and path.suffix.lower() == extension:
             key = path.stem.casefold()
-
             if key in files:
-                raise ValueError(
-                    f"Duplicate filename found: {path.stem}"
-                )
-
+                raise ValueError(f"Duplicate filename found: {path.stem}")
             files[key] = path
 
     return files
 
 
 def get_speaker_info(cha_text):
-    """Extract available PAR information from the @ID header."""
-
+    """Extract available PAR information from the @ID header in a .cha file."""
     for line in cha_text.splitlines():
-
         if line.startswith("@ID:"):
             fields = line.split(":", 1)[1].strip().split("|")
-
             if len(fields) >= 3 and fields[2].strip().upper() == "PAR":
-
                 fields += [""] * (10 - len(fields))
-
                 return {
                     "language": fields[0].strip(),
                     "corpus": fields[1].strip(),
@@ -84,98 +119,37 @@ def get_speaker_info(cha_text):
                     "education": fields[8].strip(),
                     "other": fields[9].strip()
                 }
-
     return {"speaker_code": "PAR"}
 
 
-def clean_transcript(text):
-    """Remove CHAT markup while retaining spoken words."""
+def clean_verbatim_text(text):
+    """
+    Clean verbatim transcript while strictly preserving all stuttered disfluencies
+    (repetitions, partial words, filled pauses, false starts).
+    """
+    if not text:
+        return ""
 
-    # Remove timestamps
-    text = TIMESTAMP_RE.sub(" ", text)
+    # Normalize multiple whitespace
+    text = re.sub(r"\s+", " ", text).strip()
 
-    # Convert fillers: &-um -> um, &-uh -> uh
-    text = re.sub(r"&[-+](?=[A-Za-z])", "", text)
-
-    # Remove non-speech event tags such as &=laugh
-    text = re.sub(r"&=[A-Za-z0-9_-]+", " ", text)
-
-    # Keep words inside angle brackets, remove only brackets
-    text = text.replace("<", " ").replace(">", " ")
-
-    # Remove CHAT annotations such as [//], [/], [=! ...]
+    # Normalize stray CHAT annotations if any leak through
     text = re.sub(r"\[[^\]]*\]", " ", text)
+    text = text.replace("<", " ").replace(">", " ").replace("_", " ").replace("|", " ")
+    text = re.sub(r"\s+", " ", text).strip()
 
-    # Remove CHAT suffix tags such as word@u
-    text = re.sub(r"(?<=\w)@[A-Za-z][A-Za-z0-9_-]*", "", text)
+    # Capitalize the first letter of the sentence for standard TTS reading
+    if text:
+        text = text[0].upper() + text[1:]
+        # Ensure ending punctuation if not present
+        if not text.endswith((".", "!", "?")):
+            text = text + "."
 
-    # Replace underscores and pipe characters
-    text = text.replace("_", " ").replace("|", " ")
-
-    # Normalize spaces and punctuation
-    text = re.sub(r"\s+([,.!?;:])", r"\1", text)
-    text = re.sub(r"\s+", " ", text)
-
-    return text.strip()
-
-
-def extract_par_utterances(cha_text):
-    """
-    Extract each PAR utterance and its global timestamps.
-
-    Returns:
-        raw_text, start_ms, end_ms
-    """
-
-    tiers = list(TIER_RE.finditer(cha_text))
-
-    for i, match in enumerate(tiers):
-
-        speaker = match.group(1).upper()
-
-        if speaker != "PAR":
-            continue
-
-        # Everything until the next speaker tier belongs to this utterance
-        block_end = (
-            tiers[i + 1].start()
-            if i + 1 < len(tiers)
-            else len(cha_text)
-        )
-
-        block = cha_text[match.end():block_end]
-
-        spoken_lines = []
-
-        for line in block.splitlines():
-
-            line = line.strip()
-
-            # Ignore dependent tiers and header lines
-            if not line or line.startswith(("%", "@")):
-                continue
-
-            spoken_lines.append(line)
-
-        raw_text = " ".join(spoken_lines)
-
-        timestamps = [
-            (int(start), int(end))
-            for start, end in TIMESTAMP_RE.findall(block)
-        ]
-
-        if timestamps:
-            start_ms = min(start for start, end in timestamps)
-            end_ms = max(end for start, end in timestamps)
-        else:
-            start_ms = end_ms = None
-
-        yield raw_text, start_ms, end_ms
+    return text
 
 
 def get_audio_duration(wav_path):
     """Read the original WAV duration using FFprobe."""
-
     result = subprocess.run(
         [
             "ffprobe",
@@ -188,312 +162,274 @@ def get_audio_duration(wav_path):
         text=True,
         check=True
     )
-
     return float(result.stdout.strip())
 
 
 def write_xtts_metadata(path, rows):
     """
-    XTTS demo metadata format:
+    XTTS training metadata format:
     audio_file|text|speaker_name
     """
-
     with open(path, "w", newline="", encoding="utf-8") as f:
-
         writer = csv.DictWriter(
             f,
             fieldnames=["audio_file", "text", "speaker_name"],
             delimiter="|"
         )
-
         writer.writeheader()
         writer.writerows(rows)
 
 
 def write_csv(path, rows):
-
     if not rows:
         return
-
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-
         writer = csv.DictWriter(
             f,
             fieldnames=list(rows[0].keys())
         )
-
         writer.writeheader()
         writer.writerows(rows)
 
 
 def main():
-
     args = parse_args()
 
+    metadata_csv_path = args.metadata_csv.resolve()
     wav_dir = args.wav_dir.resolve()
     cha_dir = args.cha_dir.resolve()
     output_dir = args.output_dir.resolve()
 
-    if not wav_dir.is_dir() or not cha_dir.is_dir():
-        raise FileNotFoundError("Check your WAV and CHA folder paths.")
-
-    if args.padding < 0:
-        raise ValueError("Padding cannot be negative.")
+    if not metadata_csv_path.is_file():
+        raise FileNotFoundError(f"Metadata CSV not found at: {metadata_csv_path}")
+    if not wav_dir.is_dir():
+        raise FileNotFoundError(f"WAV directory not found at: {wav_dir}")
 
     if not 0 <= args.eval_ratio < 1:
         raise ValueError("Evaluation ratio must be between 0 and 1.")
 
     wav_files = find_files(wav_dir, ".wav")
-    cha_files = find_files(cha_dir, ".cha")
+    cha_files = find_files(cha_dir, ".cha") if cha_dir.is_dir() else {}
 
-    matched = sorted(set(wav_files) & set(cha_files))
-
-    print("WAV files:", len(wav_files))
-    print("CHA files:", len(cha_files))
-    print("Matched pairs:", len(matched))
-
-    if not matched:
-        raise RuntimeError("No matching WAV and CHA filenames found.")
-
-    missing_cha = sorted(set(wav_files) - set(cha_files))
-    missing_wav = sorted(set(cha_files) - set(wav_files))
-
-    if missing_cha:
-        print("WAVs without CHA:", missing_cha)
-
-    if missing_wav:
-        print("CHAs without WAV:", missing_wav)
+    print(f"Loaded master WAV files: {len(wav_files)}")
+    print(f"Loaded CHA files (for demographics): {len(cha_files)}")
+    print(f"Reading disfluent metadata: {metadata_csv_path}")
 
     if not args.dry_run:
-
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-            raise RuntimeError("Install FFmpeg and add it to PATH.")
-
+            raise RuntimeError("Install FFmpeg/FFprobe and ensure they are added to PATH.")
         (output_dir / "wavs").mkdir(parents=True, exist_ok=True)
+
+    # Cache WAV durations so we don't call ffprobe repeatedly
+    wav_durations = {}
 
     trainable = []
     audit = []
     skipped = []
     speaker_metadata = {}
 
-    for key in matched:
+    with open(metadata_csv_path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        segments = list(reader)
 
-        wav_path = wav_files[key]
-        cha_path = cha_files[key]
+    print(f"Total candidate segments in metadata: {len(segments)}")
 
-        recording = wav_path.stem
+    disfluent_count = 0
+
+    for row_idx, row in enumerate(segments, start=1):
+        segid = row.get("segid", "").strip()
+        raw_start = row.get("segstart", "").strip()
+        raw_end = row.get("segend", "").strip()
+        verbatim = row.get("verbatim", "").strip()
+        intended = row.get("intended", "").strip()
+
+        # segid format: e.g. 24fb_000 -> speaker: 24fb, utterance: 000
+        parts = segid.split("_", 1)
+        recording = parts[0]
+        utterance_id = parts[1] if len(parts) > 1 else f"{row_idx:04d}"
 
         speaker_name = SPEAKER_OVERRIDES.get(
             recording,
             f"{recording}_PAR"
         )
 
-        cha_text = cha_path.read_text(
-            encoding="utf-8-sig",
-            errors="replace"
-        )
-
-        speaker_info = get_speaker_info(cha_text)
-
+        # Track speaker metadata from CHA header if available
         if speaker_name not in speaker_metadata:
+            speaker_info = {"speaker_code": "PAR"}
+            cha_key = recording.casefold()
+            if cha_key in cha_files:
+                cha_text = cha_files[cha_key].read_text(encoding="utf-8-sig", errors="replace")
+                speaker_info = get_speaker_info(cha_text)
 
             speaker_metadata[speaker_name] = {
                 **speaker_info,
                 "speaker_name": speaker_name,
                 "recordings": []
             }
+            if recording.casefold() in wav_files:
+                speaker_metadata[speaker_name]["recordings"].append({
+                    "wav": wav_files[recording.casefold()].name,
+                    "cha": cha_files.get(cha_key, Path(f"{recording}.cha")).name
+                })
 
-        speaker_metadata[speaker_name]["recordings"].append({
-            "wav": wav_path.name,
-            "cha": cha_path.name
-        })
+        text = clean_verbatim_text(verbatim)
+        is_disfluent = (verbatim.casefold() != intended.casefold())
+        if is_disfluent:
+            disfluent_count += 1
 
-        audio_duration = (
-            None if args.dry_run
-            else get_audio_duration(wav_path)
-        )
+        reason = ""
 
-        utterance_number = 0
+        # Validation: Check raw master WAV existence
+        wav_key = recording.casefold()
+        if wav_key not in wav_files:
+            reason = "missing_source_wav"
+            wav_path = None
+        else:
+            wav_path = wav_files[wav_key]
 
-        for raw_text, start_ms, end_ms in extract_par_utterances(cha_text):
+        # Validation: Parse timestamps
+        try:
+            start_sec = float(raw_start)
+            end_sec = float(raw_end)
+        except (ValueError, TypeError):
+            reason = "invalid_timestamp"
+            start_sec = end_sec = 0.0
 
-            utterance_number += 1
-
-            text = clean_transcript(raw_text)
-            reason = ""
-
-            if start_ms is None or end_ms is None:
-                reason = "missing_timestamp"
-
-            elif end_ms <= start_ms:
-                reason = "invalid_timestamp"
-
+        if not reason:
+            if end_sec <= start_sec:
+                reason = "end_time_not_greater_than_start"
             elif not text:
                 reason = "empty_transcript"
-
             elif UNINTELLIGIBLE_RE.search(text):
-                reason = "unintelligible_transcript_requires_review"
+                reason = "unintelligible_transcript"
 
-            if start_ms is not None and end_ms is not None and end_ms > start_ms:
+        start = max(0.0, start_sec - args.padding)
+        end = end_sec + args.padding
+        duration = end - start
 
-                start = max(0, start_ms / 1000 - args.padding)
-                end = end_ms / 1000 + args.padding
-                duration = end - start
-
-                if audio_duration is not None and end > audio_duration + 0.05:
-                    reason = "timestamp_exceeds_audio_duration"
-
-                if duration < MIN_CLIP_DURATION and not reason:
-                    reason = "clip_too_short"
-
-            else:
-                start = end = duration = 0.0
-
-            clip_name = (
-                f"{recording}_PAR_{utterance_number:04d}_"
-                f"{start:.3f}_{end:.3f}.wav"
-            )
-
-            relative_path = f"wavs/{clip_name}"
-
-            status = "excluded" if reason else "pending"
-
-            # Clip audio
-            if not reason and not args.dry_run:
-
-                output_wav = output_dir / relative_path
-
-                command = [
-                    "ffmpeg",
-                    "-hide_banner",
-                    "-loglevel", "error",
-                    "-y",
-                    "-i", str(wav_path),
-                    "-ss", f"{start:.3f}",
-                    "-t", f"{duration:.3f}",
-                    "-map", "0:a:0",
-                    "-vn",
-                    "-ac", "1",
-                    "-ar", str(SAMPLE_RATE),
-                    "-c:a", "pcm_s16le",
-                    str(output_wav)
-                ]
-
+        if not reason and wav_path:
+            if wav_key not in wav_durations and not args.dry_run:
                 try:
+                    wav_durations[wav_key] = get_audio_duration(wav_path)
+                except Exception:
+                    wav_durations[wav_key] = None
 
-                    subprocess.run(
-                        command,
-                        check=True,
-                        capture_output=True,
-                        text=True
-                    )
+            audio_total_dur = wav_durations.get(wav_key)
+            if audio_total_dur and end > audio_total_dur + 0.05:
+                reason = "timestamp_exceeds_audio_duration"
+            elif duration < args.min_duration:
+                reason = "clip_too_short"
+            elif duration > args.max_duration:
+                reason = "clip_too_long"
 
-                    if not output_wav.exists() or output_wav.stat().st_size == 0:
-                        raise RuntimeError("Empty output audio file.")
+        clip_name = f"{recording}_PAR_{utterance_id}_{start:.3f}_{end:.3f}.wav"
+        relative_path = f"wavs/{clip_name}"
+        status = "excluded" if reason else "pending"
 
-                    status = "created"
+        # Slice audio clip
+        if not reason and not args.dry_run:
+            output_wav = output_dir / relative_path
 
-                except (subprocess.CalledProcessError, RuntimeError) as error:
+            # FFmpeg: slice and convert to mono 22050Hz 16-bit PCM WAV (XTTS standard)
+            command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",
+                "-ss", f"{start:.3f}",
+                "-t", f"{duration:.3f}",
+                "-i", str(wav_path),
+                "-map", "0:a:0",
+                "-vn",
+                "-ac", "1",
+                "-ar", str(SAMPLE_RATE),
+                "-c:a", "pcm_s16le",
+                str(output_wav)
+            ]
 
-                    reason = f"ffmpeg_error: {error}"
-                    status = "excluded"
+            try:
+                subprocess.run(command, check=True, capture_output=True, text=True)
+                if not output_wav.exists() or output_wav.stat().st_size == 0:
+                    raise RuntimeError("Output audio file is empty or missing.")
+                status = "created"
+            except (subprocess.CalledProcessError, RuntimeError) as error:
+                reason = f"ffmpeg_error: {error}"
+                status = "excluded"
 
-            if reason:
-
-                skipped.append({
-                    "recording": recording,
-                    "utterance_number": utterance_number,
-                    "start_ms": start_ms,
-                    "end_ms": end_ms,
-                    "reason": reason,
-                    "raw_text": raw_text,
-                    "cleaned_text": text
-                })
-
-            elif not args.dry_run:
-
-                trainable.append({
-                    "audio_file": relative_path,
-                    "text": text,
-                    "speaker_name": speaker_name
-                })
-
-            audit.append({
-                "clip": clip_name if not reason else "",
-                "speaker_name": speaker_name,
-                "source_wav": wav_path.name,
-                "source_cha": cha_path.name,
-                "utterance_number": utterance_number,
-                "start_ms": start_ms if start_ms is not None else "",
-                "end_ms": end_ms if end_ms is not None else "",
-                "start_sec": f"{start:.3f}" if start_ms is not None else "",
-                "end_sec": f"{end:.3f}" if end_ms is not None else "",
-                "duration_sec": f"{duration:.3f}" if start_ms is not None else "",
-                "raw_chat_text": raw_text,
-                "cleaned_text": text,
-                "status": status,
-                "reason": reason
+        if reason:
+            skipped.append({
+                "recording": recording,
+                "utterance_id": utterance_id,
+                "start_sec": f"{start_sec:.3f}",
+                "end_sec": f"{end_sec:.3f}",
+                "duration_sec": f"{duration:.3f}",
+                "reason": reason,
+                "verbatim": verbatim,
+                "intended": intended,
+                "cleaned_text": text
+            })
+        elif not args.dry_run:
+            trainable.append({
+                "audio_file": relative_path,
+                "text": text,
+                "speaker_name": speaker_name
             })
 
-        print(f"Processed {recording}: {utterance_number} PAR utterances")
+        audit.append({
+            "clip": clip_name if not reason else "",
+            "segid": segid,
+            "speaker_name": speaker_name,
+            "source_wav": wav_path.name if wav_path else "",
+            "utterance_id": utterance_id,
+            "start_sec": f"{start:.3f}",
+            "end_sec": f"{end:.3f}",
+            "duration_sec": f"{duration:.3f}",
+            "is_disfluent": is_disfluent,
+            "verbatim_text": verbatim,
+            "intended_text": intended,
+            "cleaned_text": text,
+            "status": status,
+            "reason": reason
+        })
+
+    print(f"Segments with disfluencies: {disfluent_count} / {len(segments)}")
 
     if args.dry_run:
-
-        print("\nDry run complete. No clips or metadata were created.")
+        trainable_count = len([a for a in audit if a["status"] != "excluded"])
+        print("\n--- Dry Run Summary ---")
+        print(f"Total candidate segments: {len(segments)}")
+        print(f"Valid trainable clips: {trainable_count}")
+        print(f"Skipped segments: {len(skipped)}")
         return
 
-    # Reproducible train/evaluation split
+    # Reproducible train/eval split (85% train, 15% eval)
     random.Random(RANDOM_SEED).shuffle(trainable)
 
     eval_count = 0
-
     if len(trainable) >= 2 and args.eval_ratio > 0:
-
-        eval_count = max(
-            1,
-            int(len(trainable) * args.eval_ratio)
-        )
-
+        eval_count = max(1, int(len(trainable) * args.eval_ratio))
         eval_count = min(eval_count, len(trainable) - 1)
 
     eval_rows = trainable[:eval_count]
     train_rows = trainable[eval_count:]
 
-    # XTTS metadata files
-    write_xtts_metadata(
-        output_dir / "metadata_train.csv",
-        train_rows
-    )
+    # Write XTTS metadata files
+    write_xtts_metadata(output_dir / "metadata_train.csv", train_rows)
+    write_xtts_metadata(output_dir / "metadata_eval.csv", eval_rows)
 
-    write_xtts_metadata(
-        output_dir / "metadata_eval.csv",
-        eval_rows
-    )
-
-    # Additional audit and speaker information
+    # Write audit, skipped logs, and speaker metadata
     write_csv(output_dir / "metadata_audit.csv", audit)
-
     write_csv(output_dir / "skipped_utterances.csv", skipped)
 
-    with open(
-        output_dir / "speaker_metadata.json",
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            speaker_metadata,
-            f,
-            indent=4,
-            ensure_ascii=False
-        )
+    with open(output_dir / "speaker_metadata.json", "w", encoding="utf-8") as f:
+        json.dump(speaker_metadata, f, indent=4, ensure_ascii=False)
 
     print("\nDataset preparation complete!")
-    print("Usable clips:", len(trainable))
-    print("Training samples:", len(train_rows))
-    print("Evaluation samples:", len(eval_rows))
-    print("Skipped samples:", len(skipped))
-    print("Output directory:", output_dir)
+    print(f"Total usable clips: {len(trainable)}")
+    print(f"Training samples: {len(train_rows)}")
+    print(f"Evaluation samples: {len(eval_rows)}")
+    print(f"Skipped samples: {len(skipped)}")
+    print(f"Output directory: {output_dir}")
 
 
 if __name__ == "__main__":

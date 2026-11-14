@@ -1,0 +1,655 @@
+{
+    "24fa_PAR": {
+        "speaker_code": "PAR",
+        "speaker_name": "24fa_PAR",
+        "recordings": []
+    },
+    "24fb_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "24;",
+        "sex": "female",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "24fb_PAR",
+        "recordings": [
+            {
+                "wav": "24fb.wav",
+                "cha": "24fb.cha"
+            }
+        ]
+    },
+    "24fc_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "24;",
+        "sex": "female",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "24fc_PAR",
+        "recordings": [
+            {
+                "wav": "24fc.wav",
+                "cha": "24fc.cha"
+            }
+        ]
+    },
+    "24ma_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "24;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "24ma_PAR",
+        "recordings": [
+            {
+                "wav": "24ma.wav",
+                "cha": "24ma.cha"
+            }
+        ]
+    },
+    "24mb_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "24;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "24mb_PAR",
+        "recordings": [
+            {
+                "wav": "24mb.wav",
+                "cha": "24mb.cha"
+            }
+        ]
+    },
+    "25m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "25;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "25m_PAR",
+        "recordings": [
+            {
+                "wav": "25m.wav",
+                "cha": "25m.cha"
+            }
+        ]
+    },
+    "26f_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "26;",
+        "sex": "female",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "26f_PAR",
+        "recordings": [
+            {
+                "wav": "26f.wav",
+                "cha": "26f.cha"
+            }
+        ]
+    },
+    "26m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "26;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "26m_PAR",
+        "recordings": [
+            {
+                "wav": "26m.wav",
+                "cha": "26m.cha"
+            }
+        ]
+    },
+    "27ma_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "27ma_PAR",
+        "recordings": [
+            {
+                "wav": "27ma.wav",
+                "cha": "27ma.cha"
+            }
+        ]
+    },
+    "28m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "28;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "28m_PAR",
+        "recordings": [
+            {
+                "wav": "28m.wav",
+                "cha": "28m.cha"
+            }
+        ]
+    },
+    "29ma_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "29ma_PAR",
+        "recordings": [
+            {
+                "wav": "29ma.wav",
+                "cha": "29ma.cha"
+            }
+        ]
+    },
+    "29mb_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "29;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "29mb_PAR",
+        "recordings": [
+            {
+                "wav": "29mb.wav",
+                "cha": "29mb.cha"
+            }
+        ]
+    },
+    "29mc_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "29;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "29mc_PAR",
+        "recordings": [
+            {
+                "wav": "29mc.wav",
+                "cha": "29mc.cha"
+            }
+        ]
+    },
+    "32m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "32;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "32m_PAR",
+        "recordings": [
+            {
+                "wav": "32m.wav",
+                "cha": "32m.cha"
+            }
+        ]
+    },
+    "34m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "34;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "34m_PAR",
+        "recordings": [
+            {
+                "wav": "34m.wav",
+                "cha": "34m.cha"
+            }
+        ]
+    },
+    "35ma_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "35ma_PAR",
+        "recordings": [
+            {
+                "wav": "35ma.wav",
+                "cha": "35ma.cha"
+            }
+        ]
+    },
+    "35mb_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "35mb_PAR",
+        "recordings": [
+            {
+                "wav": "35mb.wav",
+                "cha": "35mb.cha"
+            }
+        ]
+    },
+    "37m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "37m_PAR",
+        "recordings": [
+            {
+                "wav": "37m.wav",
+                "cha": "37m.cha"
+            }
+        ]
+    },
+    "39f_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "39f_PAR",
+        "recordings": [
+            {
+                "wav": "39f.wav",
+                "cha": "39f.cha"
+            }
+        ]
+    },
+    "43m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "43m_PAR",
+        "recordings": [
+            {
+                "wav": "43m.wav",
+                "cha": "43m.cha"
+            }
+        ]
+    },
+    "44m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "Clutterer",
+        "other": "",
+        "speaker_name": "44m_PAR",
+        "recordings": [
+            {
+                "wav": "44m.wav",
+                "cha": "44m.cha"
+            }
+        ]
+    },
+    "46ma_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "46;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "46ma_PAR",
+        "recordings": [
+            {
+                "wav": "46ma.wav",
+                "cha": "46ma.cha"
+            }
+        ]
+    },
+    "46mb_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "46mb_PAR",
+        "recordings": [
+            {
+                "wav": "46mb.wav",
+                "cha": "46mb.cha"
+            }
+        ]
+    },
+    "503_PAR": {
+        "speaker_code": "PAR",
+        "speaker_name": "503_PAR",
+        "recordings": [
+            {
+                "wav": "503.wav",
+                "cha": "503.cha"
+            }
+        ]
+    },
+    "507_PAR": {
+        "speaker_code": "PAR",
+        "speaker_name": "507_PAR",
+        "recordings": [
+            {
+                "wav": "507.wav",
+                "cha": "507.cha"
+            }
+        ]
+    },
+    "508_PAR": {
+        "speaker_code": "PAR",
+        "speaker_name": "508_PAR",
+        "recordings": [
+            {
+                "wav": "508.wav",
+                "cha": "508.cha"
+            }
+        ]
+    },
+    "509_PAR": {
+        "speaker_code": "PAR",
+        "speaker_name": "509_PAR",
+        "recordings": [
+            {
+                "wav": "509.wav",
+                "cha": "509.cha"
+            }
+        ]
+    },
+    "50fa_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "50;",
+        "sex": "female",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "50fa_PAR",
+        "recordings": [
+            {
+                "wav": "50fa.wav",
+                "cha": "50fa.cha"
+            }
+        ]
+    },
+    "50fb_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "50;",
+        "sex": "female",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "50fb_PAR",
+        "recordings": [
+            {
+                "wav": "50fb.wav",
+                "cha": "50fb.cha"
+            }
+        ]
+    },
+    "54f_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "54f_PAR",
+        "recordings": [
+            {
+                "wav": "54f.wav",
+                "cha": "54f.cha"
+            }
+        ]
+    },
+    "54m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "54m_PAR",
+        "recordings": [
+            {
+                "wav": "54m.wav",
+                "cha": "54m.cha"
+            }
+        ]
+    },
+    "57m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "57m_PAR",
+        "recordings": [
+            {
+                "wav": "57m.wav",
+                "cha": "57m.cha"
+            }
+        ]
+    },
+    "60m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "60;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "60m_PAR",
+        "recordings": [
+            {
+                "wav": "60m.wav",
+                "cha": "60m.cha"
+            }
+        ]
+    },
+    "62f_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "62;",
+        "sex": "female",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "62f_PAR",
+        "recordings": [
+            {
+                "wav": "62f.wav",
+                "cha": "62f.cha"
+            }
+        ]
+    },
+    "62m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "62;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "62m_PAR",
+        "recordings": [
+            {
+                "wav": "62m.wav",
+                "cha": "62m.cha"
+            }
+        ]
+    },
+    "64m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "64m_PAR",
+        "recordings": [
+            {
+                "wav": "64m.wav",
+                "cha": "64m.cha"
+            }
+        ]
+    },
+    "68m_PAR": {
+        "language": "eng",
+        "corpus": "Voices-AWS",
+        "speaker_code": "PAR",
+        "age": "68;",
+        "sex": "male",
+        "group": "",
+        "ses": "",
+        "role": "Participant",
+        "education": "",
+        "other": "",
+        "speaker_name": "68m_PAR",
+        "recordings": [
+            {
+                "wav": "68m.wav",
+                "cha": "68m.cha"
+            }
+        ]
+    }
+}
