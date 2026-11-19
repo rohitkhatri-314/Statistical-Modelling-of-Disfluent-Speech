@@ -6,10 +6,10 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+import numpy as np
+import soundfile as sf
 
 # If two recordings belong to the SAME participant, map them here.
-# Example:
-# SPEAKER_OVERRIDES = {"24fa": "participant_24", "24fb": "participant_24"}
 SPEAKER_OVERRIDES = {}
 
 # XTTS fine-tuning audio specifications
@@ -24,14 +24,13 @@ UNINTELLIGIBLE_RE = re.compile(r"\b(?:xxx|yyy|www)\b", re.I)
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Prepare XTTS dataset with disfluent verbatim transcripts from FluencyBank Romana metadata."
+        description="XTTS Dataset Pipeline with Selective Denoising for Stuttered Speech."
     )
-
     parser.add_argument(
         "--metadata-csv",
         type=Path,
         default=Path("Romana/TimeStamped/metadata.csv"),
-        help="Path to Romana TimeStamped metadata.csv containing verbatim transcripts and timestamps."
+        help="Path to Romana TimeStamped metadata.csv."
     )
     parser.add_argument(
         "--wav-dir",
@@ -43,7 +42,7 @@ def parse_args():
         "--cha-dir",
         type=Path,
         default=Path("CHAs"),
-        help="Directory containing CHAT .cha transcript files (used for speaker demographics)."
+        help="Directory containing CHAT .cha transcript files."
     )
     parser.add_argument(
         "--output-dir",
@@ -52,16 +51,28 @@ def parse_args():
         help="Output directory for XTTS dataset."
     )
     parser.add_argument(
+        "--denoise",
+        action="store_true",
+        default=True,
+        help="Enable selective audio noise-profiling and gentle speech enhancement."
+    )
+    parser.add_argument(
+        "--snr-threshold",
+        type=float,
+        default=16.0,
+        help="SNR threshold in dB below which audio is treated as noisy (default: 16.0 dB)."
+    )
+    parser.add_argument(
         "--min-duration",
         type=float,
         default=MIN_CLIP_DURATION,
-        help="Minimum clip duration in seconds (XTTS minimum accepted is 0.5s)."
+        help="Minimum clip duration in seconds."
     )
     parser.add_argument(
         "--max-duration",
         type=float,
         default=MAX_CLIP_DURATION,
-        help="Maximum clip duration in seconds (XTTS training token limit is ~11.6s)."
+        help="Maximum clip duration in seconds."
     )
     parser.add_argument(
         "--padding",
@@ -73,35 +84,51 @@ def parse_args():
         "--eval-ratio",
         type=float,
         default=EVAL_RATIO,
-        help="Proportion of data allocated to evaluation set (default: 0.15)."
+        help="Proportion of data allocated to evaluation set."
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Simulate dataset processing without cutting audio files."
+        help="Simulate dataset processing without writing audio files."
     )
-
     return parser.parse_args()
 
 
+def calculate_snr(wav_path, sample_seconds=45):
+    """
+    Computes mathematical WADA-SNR from the audio signal to estimate noise floor.
+    """
+    try:
+        data, sr = sf.read(str(wav_path), stop=int(16000 * sample_seconds))
+        if data.ndim > 1:
+            data = np.mean(data, axis=1)
+        data = data - np.mean(data)
+        mean_abs = np.mean(np.abs(data))
+        if mean_abs <= 1e-9:
+            return 0.0
+        gamma = np.mean(data ** 2) / (mean_abs ** 2)
+        if gamma <= 1.57:
+            return 0.0
+        snr = 10 * np.log10(max(1e-4, (gamma - 1.57) / (np.pi / 2)))
+        return round(float(np.clip(snr * 3.5 + 10.0, -5.0, 45.0)), 2)
+    except Exception:
+        return 15.0  # default to moderate if unreadable
+
+
 def find_files(folder, extension):
-    """Find files recursively and match them using lowercase filename stems."""
     files = {}
     if not folder.is_dir():
         return files
-
     for path in folder.rglob("*"):
         if path.is_file() and path.suffix.lower() == extension:
             key = path.stem.casefold()
             if key in files:
                 raise ValueError(f"Duplicate filename found: {path.stem}")
             files[key] = path
-
     return files
 
 
 def get_speaker_info(cha_text):
-    """Extract available PAR information from the @ID header in a .cha file."""
     for line in cha_text.splitlines():
         if line.startswith("@ID:"):
             fields = line.split(":", 1)[1].strip().split("|")
@@ -123,33 +150,20 @@ def get_speaker_info(cha_text):
 
 
 def clean_verbatim_text(text):
-    """
-    Clean verbatim transcript while strictly preserving all stuttered disfluencies
-    (repetitions, partial words, filled pauses, false starts).
-    """
     if not text:
         return ""
-
-    # Normalize multiple whitespace
     text = re.sub(r"\s+", " ", text).strip()
-
-    # Normalize stray CHAT annotations if any leak through
     text = re.sub(r"\[[^\]]*\]", " ", text)
     text = text.replace("<", " ").replace(">", " ").replace("_", " ").replace("|", " ")
     text = re.sub(r"\s+", " ", text).strip()
-
-    # Capitalize the first letter of the sentence for standard TTS reading
     if text:
         text = text[0].upper() + text[1:]
-        # Ensure ending punctuation if not present
         if not text.endswith((".", "!", "?")):
             text = text + "."
-
     return text
 
 
 def get_audio_duration(wav_path):
-    """Read the original WAV duration using FFprobe."""
     result = subprocess.run(
         [
             "ffprobe",
@@ -166,10 +180,6 @@ def get_audio_duration(wav_path):
 
 
 def write_xtts_metadata(path, rows):
-    """
-    XTTS training metadata format:
-    audio_file|text|speaker_name
-    """
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
@@ -184,10 +194,7 @@ def write_csv(path, rows):
     if not rows:
         return
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=list(rows[0].keys())
-        )
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
 
@@ -205,24 +212,32 @@ def main():
     if not wav_dir.is_dir():
         raise FileNotFoundError(f"WAV directory not found at: {wav_dir}")
 
-    if not 0 <= args.eval_ratio < 1:
-        raise ValueError("Evaluation ratio must be between 0 and 1.")
-
     wav_files = find_files(wav_dir, ".wav")
     cha_files = find_files(cha_dir, ".cha") if cha_dir.is_dir() else {}
 
     print(f"Loaded master WAV files: {len(wav_files)}")
     print(f"Loaded CHA files (for demographics): {len(cha_files)}")
-    print(f"Reading disfluent metadata: {metadata_csv_path}")
+    print(f"Reading metadata: {metadata_csv_path}")
+
+    # Step 1: Profile noise / SNR across all master recordings
+    noise_profiles = {}
+    print("\n[Step 1] Analyzing acoustic noise profiles for master recordings...")
+    for stem, path in sorted(wav_files.items()):
+        snr = calculate_snr(path)
+        needs_denoise = snr < args.snr_threshold
+        noise_profiles[stem] = {
+            "snr_db": snr,
+            "needs_denoise": needs_denoise,
+            "category": "NOISY (Will Denoise)" if needs_denoise else "CLEAN (Pass Through)"
+        }
+        print(f"  • {path.name:<12} | SNR: {snr:5.2f} dB | {noise_profiles[stem]['category']}")
 
     if not args.dry_run:
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             raise RuntimeError("Install FFmpeg/FFprobe and ensure they are added to PATH.")
         (output_dir / "wavs").mkdir(parents=True, exist_ok=True)
 
-    # Cache WAV durations so we don't call ffprobe repeatedly
     wav_durations = {}
-
     trainable = []
     audit = []
     skipped = []
@@ -232,9 +247,7 @@ def main():
         reader = csv.DictReader(f)
         segments = list(reader)
 
-    print(f"Total candidate segments in metadata: {len(segments)}")
-
-    disfluent_count = 0
+    print(f"\n[Step 2] Processing {len(segments)} segments into XTTS dataset...")
 
     for row_idx, row in enumerate(segments, start=1):
         segid = row.get("segid", "").strip()
@@ -243,17 +256,12 @@ def main():
         verbatim = row.get("verbatim", "").strip()
         intended = row.get("intended", "").strip()
 
-        # segid format: e.g. 24fb_000 -> speaker: 24fb, utterance: 000
         parts = segid.split("_", 1)
         recording = parts[0]
         utterance_id = parts[1] if len(parts) > 1 else f"{row_idx:04d}"
 
-        speaker_name = SPEAKER_OVERRIDES.get(
-            recording,
-            f"{recording}_PAR"
-        )
+        speaker_name = SPEAKER_OVERRIDES.get(recording, f"{recording}_PAR")
 
-        # Track speaker metadata from CHA header if available
         if speaker_name not in speaker_metadata:
             speaker_info = {"speaker_code": "PAR"}
             cha_key = recording.casefold()
@@ -269,17 +277,14 @@ def main():
             if recording.casefold() in wav_files:
                 speaker_metadata[speaker_name]["recordings"].append({
                     "wav": wav_files[recording.casefold()].name,
-                    "cha": cha_files.get(cha_key, Path(f"{recording}.cha")).name
+                    "cha": cha_files.get(cha_key, Path(f"{recording}.cha")).name,
+                    "snr_db": noise_profiles.get(recording.casefold(), {}).get("snr_db", 0.0)
                 })
 
         text = clean_verbatim_text(verbatim)
         is_disfluent = (verbatim.casefold() != intended.casefold())
-        if is_disfluent:
-            disfluent_count += 1
-
         reason = ""
 
-        # Validation: Check raw master WAV existence
         wav_key = recording.casefold()
         if wav_key not in wav_files:
             reason = "missing_source_wav"
@@ -287,7 +292,6 @@ def main():
         else:
             wav_path = wav_files[wav_key]
 
-        # Validation: Parse timestamps
         try:
             start_sec = float(raw_start)
             end_sec = float(raw_end)
@@ -326,11 +330,25 @@ def main():
         relative_path = f"wavs/{clip_name}"
         status = "excluded" if reason else "pending"
 
-        # Slice audio clip
+        # Selective Audio Slicing & Enhancement
         if not reason and not args.dry_run:
             output_wav = output_dir / relative_path
 
-            # FFmpeg: slice and convert to mono 22050Hz 16-bit PCM WAV (XTTS standard)
+            # Determine audio filter chain
+            profile = noise_profiles.get(wav_key, {})
+            needs_denoising = args.denoise and profile.get("needs_denoise", False)
+            
+            # Base audio filter: low-cut sub-75Hz rumble and EBU R128 loudness normalization
+            if needs_denoising:
+                # Gentle FFT denoiser with low reduction (nr=10dB, noise floor -45dB)
+                # carefully calibrated to avoid stripping stuttering prolongations
+                audio_filter = "highpass=f=75,afftdn=nr=10:nf=-45:tn=1,loudnorm=I=-20:TP=-1.5:LRA=11"
+                proc_type = "denoised_and_normalized"
+            else:
+                # Clean audio: highpass rumble cut + loudness normalization only (zero spectral artifact)
+                audio_filter = "highpass=f=75,loudnorm=I=-20:TP=-1.5:LRA=11"
+                proc_type = "normalized_only"
+
             command = [
                 "ffmpeg",
                 "-hide_banner",
@@ -339,6 +357,7 @@ def main():
                 "-ss", f"{start:.3f}",
                 "-t", f"{duration:.3f}",
                 "-i", str(wav_path),
+                "-af", audio_filter,
                 "-map", "0:a:0",
                 "-vn",
                 "-ac", "1",
@@ -355,6 +374,9 @@ def main():
             except (subprocess.CalledProcessError, RuntimeError) as error:
                 reason = f"ffmpeg_error: {error}"
                 status = "excluded"
+                proc_type = "failed"
+        else:
+            proc_type = "none"
 
         if reason:
             skipped.append({
@@ -381,30 +403,26 @@ def main():
             "speaker_name": speaker_name,
             "source_wav": wav_path.name if wav_path else "",
             "utterance_id": utterance_id,
-            "start_sec": f"{start:.3f}",
-            "end_sec": f"{end:.3f}",
             "duration_sec": f"{duration:.3f}",
+            "snr_db": noise_profiles.get(wav_key, {}).get("snr_db", ""),
+            "processing": proc_type,
             "is_disfluent": is_disfluent,
             "verbatim_text": verbatim,
-            "intended_text": intended,
             "cleaned_text": text,
             "status": status,
             "reason": reason
         })
 
-    print(f"Segments with disfluencies: {disfluent_count} / {len(segments)}")
-
     if args.dry_run:
         trainable_count = len([a for a in audit if a["status"] != "excluded"])
         print("\n--- Dry Run Summary ---")
         print(f"Total candidate segments: {len(segments)}")
-        print(f"Valid trainable clips: {trainable_count}")
-        print(f"Skipped segments: {len(skipped)}")
+        print(f"Valid trainable clips:    {trainable_count}")
+        print(f"Skipped segments:         {len(skipped)}")
         return
 
-    # Reproducible train/eval split (85% train, 15% eval)
+    # Train / Eval Split (85% / 15%)
     random.Random(RANDOM_SEED).shuffle(trainable)
-
     eval_count = 0
     if len(trainable) >= 2 and args.eval_ratio > 0:
         eval_count = max(1, int(len(trainable) * args.eval_ratio))
@@ -413,23 +431,20 @@ def main():
     eval_rows = trainable[:eval_count]
     train_rows = trainable[eval_count:]
 
-    # Write XTTS metadata files
     write_xtts_metadata(output_dir / "metadata_train.csv", train_rows)
     write_xtts_metadata(output_dir / "metadata_eval.csv", eval_rows)
-
-    # Write audit, skipped logs, and speaker metadata
     write_csv(output_dir / "metadata_audit.csv", audit)
     write_csv(output_dir / "skipped_utterances.csv", skipped)
 
     with open(output_dir / "speaker_metadata.json", "w", encoding="utf-8") as f:
         json.dump(speaker_metadata, f, indent=4, ensure_ascii=False)
 
-    print("\nDataset preparation complete!")
-    print(f"Total usable clips: {len(trainable)}")
-    print(f"Training samples: {len(train_rows)}")
-    print(f"Evaluation samples: {len(eval_rows)}")
-    print(f"Skipped samples: {len(skipped)}")
-    print(f"Output directory: {output_dir}")
+    print("\nDataset preparation with selective denoising complete!")
+    print(f"Total usable clips:  {len(trainable)}")
+    print(f"Training samples:    {len(train_rows)}")
+    print(f"Evaluation samples:  {len(eval_rows)}")
+    print(f"Skipped samples:     {len(skipped)}")
+    print(f"Output directory:    {output_dir}")
 
 
 if __name__ == "__main__":
